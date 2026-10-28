@@ -1,0 +1,28 @@
+# Node modules
+node_modules/
+
+# Build artifacts
+dist/
+build/
+.wrangler/
+.mf/
+
+# Environment files and secrets - NEVER COMMIT
+.env
+.env.*
+.dev.vars
+.dev.vars.*
+*.pem
+*.key
+
+# Test coverage & reports
+coverage/
+test-results/
+
+# Editor / OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/

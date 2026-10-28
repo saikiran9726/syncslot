@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "syncslot",
+  "main": "src/worker/index.ts",
+  "compatibility_date": "2026-10-28",
+  "compatibility_flags": [
+    "nodejs_compat"
+  ],
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "syncslot-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "./migrations"
+    }
+  ],
+  "triggers": {
+    "crons": [
+      "*/5 * * * *"
+    ]
+  },
+  "vars": {
+    "ENVIRONMENT": "development",
+    "APP_BASE_URL": "http://localhost:8787",
+    "COOKIE_NAME": "slotsync_session",
+    "EMAIL_FROM": "SlotSync <appointments@slotsync.dev>",
+    "RATE_LIMIT_SALT": "dev_rate_limit_salt_change_in_prod",
+    "SESSION_SECRET": "dev_session_secret_change_in_prod"
+  }
+}
