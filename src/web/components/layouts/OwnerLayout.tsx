@@ -11,9 +11,12 @@ import {
   LogOut,
   Menu,
   X,
+  TrendingUp,
+  Share2,
 } from 'lucide-react';
 import { DemoBadge } from '../ui/StatusBadge';
 import { OfflineBanner } from '../ui/Feedback';
+import { ShareBookingModal } from '../ShareBookingModal';
 
 export interface OwnerLayoutProps {
   children: React.ReactNode;
@@ -21,6 +24,7 @@ export interface OwnerLayoutProps {
   currentPath?: string;
   onNavigate?: (path: string) => void;
   businessName?: string;
+  businessSlug?: string;
   isDemo?: boolean;
 }
 
@@ -29,6 +33,7 @@ export const OWNER_NAV_ITEMS = [
   { path: '/app/calendar', label: 'Calendar', icon: CalendarDays },
   { path: '/app/bookings', label: 'Bookings', icon: Clock },
   { path: '/app/customers', label: 'Customers', icon: Users },
+  { path: '/app/insights', label: 'Insights', icon: TrendingUp },
   { path: '/app/services', label: 'Services', icon: Scissors },
   { path: '/app/reviews', label: 'Reviews', icon: Star },
   { path: '/app/notifications', label: 'Notifications', icon: Bell },
@@ -41,10 +46,12 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
   currentPath,
   onNavigate = (path) => (window.location.hash = path),
   businessName = 'My Business',
+  businessSlug = '',
   isDemo = false,
 }) => {
   const effectivePath = currentPath || activePath;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [shareModalOpen, setShareModalOpen] = useState(false);
 
   return (
     <div className="min-h-screen bg-surface flex flex-col">
@@ -74,6 +81,16 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
 
         <div className="flex items-center gap-3">
           {isDemo && <DemoBadge preset="Salon Demo" />}
+          {businessSlug && (
+            <button
+              onClick={() => setShareModalOpen(true)}
+              className="flex items-center gap-1.5 text-xs font-semibold text-primary bg-primary-tint border border-primary/20 px-2.5 py-1.5 rounded-control hover:bg-primary-tint/80 focus-ring"
+              title="Share public booking link"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Share Link</span>
+            </button>
+          )}
           <button
             onClick={() => onNavigate('/login')}
             className="flex items-center gap-1.5 text-xs font-semibold text-ink-muted hover:text-danger p-2 rounded-control focus-ring transition-colors"
@@ -182,6 +199,13 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
           );
         })}
       </nav>
+
+      <ShareBookingModal
+        isOpen={shareModalOpen}
+        onClose={() => setShareModalOpen(false)}
+        businessSlug={businessSlug || ''}
+        businessName={businessName}
+      />
     </div>
   );
 };

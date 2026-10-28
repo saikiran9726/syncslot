@@ -44,7 +44,7 @@ ownerRouter.get('/business', async (c) => {
             address, accessibility_info, published, is_demo, country_code, currency,
             onboarding_step, booking_mode, requires_approval, min_notice_hours,
             max_days_ahead, cancel_cutoff_hours, cancellation_policy_text, industry_preset,
-            quiet_hours_start, quiet_hours_end, created_at_utc, updated_at_utc
+            quiet_hours_start, quiet_hours_end, review_url, created_at_utc, updated_at_utc
      FROM businesses
      WHERE id = ?`
   )
@@ -228,6 +228,7 @@ ownerRouter.patch('/business', requireOwnerRole, async (c) => {
     'requires_approval',
     'published',
     'onboarding_step',
+    'review_url',
   ];
 
   for (const key of allowedKeys) {
@@ -1232,6 +1233,87 @@ ownerRouter.post('/bookings', async (c) => {
   return c.json({ booking: created }, 201);
 });
 
+// 2. Tenant Bookings CSV Export (C6) with Formula Injection Defense
+ownerRouter.get('/bookings/export', async (c) => {
+  const businessId = c.get('business_id');
+  const businessSlug = c.get('business_slug');
+
+  const rows = await c.env.DB.prepare(
+    `SELECT b.reference, c.name as customer_name, c.display_phone as customer_phone,
+            c.email as customer_email, s.name as service_name, b.start_at_utc, b.end_at_utc,
+            b.business_timezone, b.status, b.price_minor, b.currency, b.source, b.created_at_utc
+     FROM bookings b
+     JOIN services s ON b.service_id = s.id
+     JOIN customers c ON b.customer_id = c.id
+     WHERE b.business_id = ?
+     ORDER BY b.start_at_utc DESC
+     LIMIT 5000`
+  ).bind(businessId).all<any>();
+
+  function sanitizeCsv(val: any): string {
+    if (val === null || val === undefined) return '';
+    let str = String(val).trim();
+    // Formula Injection Defense: Prefix cells starting with =, +, -, @ with a single quote
+    if (str.startsWith('=') || str.startsWith('+') || str.startsWith('-') || str.startsWith('@')) {
+      str = "'" + str;
+    }
+    if (str.includes(',') || str.includes('"') || str.includes('\n') || str.includes('\r')) {
+      str = '"' + str.replace(/"/g, '""') + '"';
+    }
+    return str;
+  }
+
+  const headers = [
+    'Reference',
+    'Customer Name',
+    'Phone',
+    'Email',
+    'Service',
+    'Start UTC',
+    'End UTC',
+    'Timezone',
+    'Status',
+    'Price (INR)',
+    'Source',
+    'Created At UTC',
+  ];
+
+  const csvLines = [headers.join(',')];
+
+  (rows.results || []).forEach((r) => {
+    const priceFormatted = (Number(r.price_minor || 0) / 100).toFixed(2);
+    csvLines.push(
+      [
+        sanitizeCsv(r.reference),
+        sanitizeCsv(r.customer_name),
+        sanitizeCsv(r.customer_phone),
+        sanitizeCsv(r.customer_email),
+        sanitizeCsv(r.service_name),
+        sanitizeCsv(r.start_at_utc),
+        sanitizeCsv(r.end_at_utc),
+        sanitizeCsv(r.business_timezone),
+        sanitizeCsv(r.status),
+        sanitizeCsv(priceFormatted),
+        sanitizeCsv(r.source),
+        sanitizeCsv(r.created_at_utc),
+      ].join(',')
+    );
+  });
+
+  const csvContent = csvLines.join('\r\n');
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = `bookings-${businessSlug || 'export'}-${dateStr}.csv`;
+
+  return new Response(csvContent, {
+    status: 200,
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-store',
+    },
+  });
+});
+
 // Booking details + audit event log
 ownerRouter.get('/bookings/:id', async (c) => {
   const businessId = c.get('business_id');
@@ -2091,4 +2173,140 @@ ownerRouter.patch('/customers/:id', async (c) => {
   ).bind(customerId, businessId).first();
 
   return c.json({ customer: updated });
+});
+
+// --- PHASE 8 EXTRAS: INSIGHTS, CSV EXPORT, REVIEWS ---
+
+// 1. Owner Insights Analytics (H1)
+ownerRouter.get('/insights', async (c) => {
+  const businessId = c.get('business_id');
+
+  const biz = await c.env.DB.prepare(
+    'SELECT timezone, currency FROM businesses WHERE id = ?'
+  ).bind(businessId).first<{ timezone: string; currency: string }>();
+
+  const tz = biz?.timezone || 'Asia/Kolkata';
+
+  // Overall counts & revenue
+  const summaryRow = await c.env.DB.prepare(
+    `SELECT
+       COUNT(*) as total_bookings,
+       SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_bookings,
+       SUM(CASE WHEN status = 'confirmed' THEN 1 ELSE 0 END) as confirmed_bookings,
+       SUM(CASE WHEN status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_bookings,
+       SUM(CASE WHEN status = 'no_show' THEN 1 ELSE 0 END) as no_show_bookings,
+       SUM(CASE WHEN status = 'completed' THEN price_minor ELSE 0 END) as total_revenue_minor
+     FROM bookings
+     WHERE business_id = ?`
+  ).bind(businessId).first<{
+    total_bookings: number;
+    completed_bookings: number;
+    confirmed_bookings: number;
+    cancelled_bookings: number;
+    no_show_bookings: number;
+    total_revenue_minor: number;
+  }>();
+
+  const total = summaryRow?.total_bookings || 0;
+  const completed = summaryRow?.completed_bookings || 0;
+  const confirmed = summaryRow?.confirmed_bookings || 0;
+  const cancelled = summaryRow?.cancelled_bookings || 0;
+  const noShow = summaryRow?.no_show_bookings || 0;
+  const totalRev = summaryRow?.total_revenue_minor || 0;
+  const cancellationRate = total > 0 ? Number(((cancelled / total) * 100).toFixed(1)) : 0;
+
+  // Top services
+  const topServicesRes = await c.env.DB.prepare(
+    `SELECT s.id, s.name,
+            COUNT(b.id) as total_bookings,
+            SUM(CASE WHEN b.status = 'completed' THEN 1 ELSE 0 END) as completed_count,
+            SUM(CASE WHEN b.status = 'completed' THEN b.price_minor ELSE 0 END) as total_revenue_minor
+     FROM services s
+     LEFT JOIN bookings b ON s.id = b.service_id AND b.business_id = ?
+     WHERE s.business_id = ?
+     GROUP BY s.id, s.name
+     ORDER BY total_bookings DESC
+     LIMIT 5`
+  ).bind(businessId, businessId).all();
+
+  // Busiest hours & distribution
+  const allBookings = await c.env.DB.prepare(
+    `SELECT start_at_utc, status FROM bookings WHERE business_id = ?`
+  ).bind(businessId).all<{ start_at_utc: string; status: string }>();
+
+  const hourCounts: Record<number, number> = {};
+  for (let h = 8; h <= 20; h++) hourCounts[h] = 0;
+
+  (allBookings.results || []).forEach((b) => {
+    try {
+      const local = utcToLocal(b.start_at_utc, tz);
+      const hour = parseInt(local.time.slice(0, 2), 10);
+      if (hour >= 8 && hour <= 20) {
+        hourCounts[hour] = (hourCounts[hour] || 0) + 1;
+      }
+    } catch {
+      // Skip malformed
+    }
+  });
+
+  const busiestHours = Object.entries(hourCounts).map(([h, count]) => ({
+    hour: parseInt(h, 10),
+    time_label: `${h.padStart(2, '0')}:00`,
+    count,
+  }));
+
+  return c.json({
+    summary: {
+      total_bookings: total,
+      completed_bookings: completed,
+      confirmed_bookings: confirmed,
+      cancelled_bookings: cancelled,
+      no_show_bookings: noShow,
+      cancellation_rate_percent: cancellationRate,
+      total_revenue_minor: totalRev,
+      currency: biz?.currency || 'INR',
+    },
+    top_services: topServicesRes.results || [],
+    busiest_hours: busiestHours,
+    is_empty: total === 0,
+  });
+});
+
+// 3. Customer Reviews Hub
+ownerRouter.get('/reviews', async (c) => {
+  const businessId = c.get('business_id');
+
+  const biz = await c.env.DB.prepare(
+    'SELECT name, slug, review_url FROM businesses WHERE id = ?'
+  ).bind(businessId).first<{ name: string; slug: string; review_url: string | null }>();
+
+  const reviewsRes = await c.env.DB.prepare(
+    `SELECT r.id, r.rating, r.comment, r.owner_reply, r.created_at_utc,
+            c.name as customer_name, s.name as service_name
+     FROM reviews r
+     JOIN customers c ON r.customer_id = c.id
+     JOIN bookings b ON r.booking_id = b.id
+     JOIN services s ON b.service_id = s.id
+     WHERE r.business_id = ?
+     ORDER BY r.created_at_utc DESC
+     LIMIT 100`
+  ).bind(businessId).all();
+
+  const reviews = reviewsRes.results || [];
+  const totalReviews = reviews.length;
+  const avgRating =
+    totalReviews > 0
+      ? Number(
+          ((reviews as any[]).reduce((sum, r) => sum + (r.rating || 0), 0) / totalReviews).toFixed(1)
+        )
+      : 0;
+
+  return c.json({
+    review_url: biz?.review_url || '',
+    business_name: biz?.name || '',
+    business_slug: biz?.slug || '',
+    average_rating: avgRating,
+    total_reviews: totalReviews,
+    reviews,
+  });
 });

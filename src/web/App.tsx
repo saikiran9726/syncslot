@@ -14,6 +14,8 @@ import { CalendarDayPage } from './pages/CalendarDayPage';
 import { BookingsListPage } from './pages/BookingsListPage';
 import { CustomersPage } from './pages/CustomersPage';
 import { NotificationsPage } from './pages/NotificationsPage';
+import { InsightsPage } from './pages/InsightsPage';
+import { ReviewsPage } from './pages/ReviewsPage';
 import { PublicBookingPage } from './pages/PublicBookingPage';
 import { PublicManagePage } from './pages/PublicManagePage';
 import { EmptyState } from './components/ui/Feedback';
@@ -78,6 +80,10 @@ const RouterContent: React.FC = () => {
       pageContent = <BookingsListPage />;
     } else if (currentPath === '/app/customers') {
       pageContent = <CustomersPage />;
+    } else if (currentPath === '/app/insights' || currentPath === '/app/analytics') {
+      pageContent = <InsightsPage />;
+    } else if (currentPath === '/app/reviews') {
+      pageContent = <ReviewsPage />;
     } else if (currentPath === '/app/notifications') {
       pageContent = <NotificationsPage />;
     } else if (currentPath === '/app/settings') {
@@ -112,6 +118,7 @@ const RouterContent: React.FC = () => {
         currentPath={currentPath}
         onNavigate={navigate}
         businessName={business?.name}
+        businessSlug={business?.slug}
         isDemo={Boolean(business?.is_demo)}
       >
         {pageContent}
