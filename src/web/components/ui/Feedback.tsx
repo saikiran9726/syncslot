@@ -7,7 +7,8 @@ import { Button } from './Button';
 export interface InlineAlertProps {
   variant?: 'info' | 'success' | 'warning' | 'danger';
   title?: string;
-  children: React.ReactNode;
+  children?: React.ReactNode;
+  message?: React.ReactNode;
   action?: {
     label: string;
     onClick: () => void;
@@ -19,9 +20,11 @@ export const InlineAlert: React.FC<InlineAlertProps> = ({
   variant = 'info',
   title,
   children,
+  message,
   action,
   className = '',
 }) => {
+  const content = children || message;
   const config = {
     info: {
       bg: 'bg-info-tint/60 border-info/30',
@@ -53,7 +56,7 @@ export const InlineAlert: React.FC<InlineAlertProps> = ({
       {config.icon}
       <div className="flex-1 text-sm">
         {title && <h3 className={`font-semibold ${config.text} mb-0.5`}>{title}</h3>}
-        <div className="text-ink leading-relaxed text-xs sm:text-sm">{children}</div>
+        <div className="text-ink leading-relaxed text-xs sm:text-sm">{content}</div>
       </div>
       {action && (
         <button
@@ -71,11 +74,14 @@ export const InlineAlert: React.FC<InlineAlertProps> = ({
 
 export interface EmptyStateProps {
   title: string;
-  reason: string;
+  reason?: string;
+  description?: string;
   action?: {
     label: string;
     onClick: () => void;
   };
+  actionLabel?: string;
+  onAction?: () => void;
   icon?: React.ReactNode;
   className?: string;
 }
@@ -83,10 +89,15 @@ export interface EmptyStateProps {
 export const EmptyState: React.FC<EmptyStateProps> = ({
   title,
   reason,
+  description,
   action,
+  actionLabel,
+  onAction,
   icon,
   className = '',
 }) => {
+  const textReason = reason || description || '';
+  const finalAction = action || (actionLabel && onAction ? { label: actionLabel, onClick: onAction } : undefined);
   return (
     <div
       className={`flex flex-col items-center justify-center text-center p-8 sm:p-12 bg-card rounded-card border border-border/80 shadow-subtle ${className}`}
@@ -99,10 +110,10 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
         </div>
       )}
       <h3 className="font-display text-lg font-semibold text-ink mb-1">{title}</h3>
-      <p className="text-sm text-ink-muted max-w-sm mb-6 leading-relaxed">{reason}</p>
-      {action && (
-        <Button variant="primary" onClick={action.onClick}>
-          {action.label}
+      <p className="text-sm text-ink-muted max-w-sm mb-6 leading-relaxed">{textReason}</p>
+      {finalAction && (
+        <Button variant="primary" onClick={finalAction.onClick}>
+          {finalAction.label}
         </Button>
       )}
     </div>

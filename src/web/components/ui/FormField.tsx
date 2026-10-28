@@ -55,16 +55,20 @@ export const FormField: React.FC<FormFieldProps> = ({
 };
 
 export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label?: string;
+  hint?: string;
+  error?: string;
   hasError?: boolean;
 }
 
 export const TextField = forwardRef<HTMLInputElement, InputProps>(
-  ({ hasError, className = '', ...props }, ref) => {
-    return (
+  ({ label, hint, error, hasError, className = '', ...props }, ref) => {
+    const isError = hasError || !!error;
+    const inputElement = (
       <input
         ref={ref}
         className={`w-full min-h-[44px] px-3.5 py-2.5 bg-card border rounded-control text-ink placeholder:text-ink-muted/50 transition-colors duration-150 focus-ring ${
-          hasError
+          isError
             ? 'border-danger focus-visible:ring-danger'
             : 'border-border hover:border-ink-muted/40'
         } ${className}`}
@@ -72,22 +76,42 @@ export const TextField = forwardRef<HTMLInputElement, InputProps>(
         {...props}
       />
     );
+
+    if (label) {
+      return (
+        <FormField
+          label={label}
+          hint={hint}
+          error={error}
+          required={props.required}
+          className={className}
+        >
+          {inputElement}
+        </FormField>
+      );
+    }
+
+    return inputElement;
   }
 );
 TextField.displayName = 'TextField';
 
 export interface TextAreaProps extends React.TextareaHTMLAttributes<HTMLTextAreaElement> {
+  label?: string;
+  hint?: string;
+  error?: string;
   hasError?: boolean;
 }
 
 export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
-  ({ hasError, className = '', rows = 3, ...props }, ref) => {
-    return (
+  ({ label, hint, error, hasError, className = '', rows = 3, ...props }, ref) => {
+    const isError = hasError || !!error;
+    const textareaElement = (
       <textarea
         ref={ref}
         rows={rows}
         className={`w-full px-3.5 py-2.5 bg-card border rounded-control text-ink placeholder:text-ink-muted/50 transition-colors duration-150 focus-ring ${
-          hasError
+          isError
             ? 'border-danger focus-visible:ring-danger'
             : 'border-border hover:border-ink-muted/40'
         } ${className}`}
@@ -95,23 +119,43 @@ export const TextArea = forwardRef<HTMLTextAreaElement, TextAreaProps>(
         {...props}
       />
     );
+
+    if (label) {
+      return (
+        <FormField
+          label={label}
+          hint={hint}
+          error={error}
+          required={props.required}
+          className={className}
+        >
+          {textareaElement}
+        </FormField>
+      );
+    }
+
+    return textareaElement;
   }
 );
 TextArea.displayName = 'TextArea';
 
 export interface SelectProps extends React.SelectHTMLAttributes<HTMLSelectElement> {
+  label?: string;
+  hint?: string;
+  error?: string;
   hasError?: boolean;
   options: Array<{ value: string; label: string; disabled?: boolean }>;
 }
 
 export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ hasError, options, className = '', ...props }, ref) => {
-    return (
+  ({ label, hint, error, hasError, options, className = '', ...props }, ref) => {
+    const isError = hasError || !!error;
+    const selectElement = (
       <div className="relative">
         <select
           ref={ref}
           className={`w-full min-h-[44px] px-3.5 py-2.5 bg-card border rounded-control text-ink appearance-none transition-colors duration-150 focus-ring pr-10 ${
-            hasError
+            isError
               ? 'border-danger focus-visible:ring-danger'
               : 'border-border hover:border-ink-muted/40'
           } ${className}`}
@@ -131,6 +175,22 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         </div>
       </div>
     );
+
+    if (label) {
+      return (
+        <FormField
+          label={label}
+          hint={hint}
+          error={error}
+          required={props.required}
+          className={className}
+        >
+          {selectElement}
+        </FormField>
+      );
+    }
+
+    return selectElement;
   }
 );
 Select.displayName = 'Select';
@@ -140,8 +200,9 @@ export interface PhoneFieldProps extends InputProps {
 }
 
 export const PhoneField = forwardRef<HTMLInputElement, PhoneFieldProps>(
-  ({ countryPrefix = '+91', hasError, className = '', ...props }, ref) => {
-    return (
+  ({ countryPrefix = '+91', label, hint, error, hasError, className = '', ...props }, ref) => {
+    const isError = hasError || !!error;
+    const phoneElement = (
       <div className="relative flex items-center">
         <div className="absolute left-3.5 flex items-center gap-1 text-sm font-semibold text-ink-muted select-none pointer-events-none">
           <span>{countryPrefix}</span>
@@ -149,41 +210,64 @@ export const PhoneField = forwardRef<HTMLInputElement, PhoneFieldProps>(
         <input
           ref={ref}
           type="tel"
-          className={`w-full min-h-[44px] pl-14 pr-3.5 py-2.5 bg-card border rounded-control text-ink placeholder:text-ink-muted/50 tabular-nums transition-colors duration-150 focus-ring ${
-            hasError
+          className={`w-full min-h-[44px] pl-14 pr-3.5 py-2.5 bg-card border rounded-control text-ink placeholder:text-ink-muted/50 transition-colors duration-150 focus-ring ${
+            isError
               ? 'border-danger focus-visible:ring-danger'
               : 'border-border hover:border-ink-muted/40'
           } ${className}`}
           style={{ fontSize: '16px' }}
-          placeholder="98765 43210"
           {...props}
         />
       </div>
     );
+
+    if (label) {
+      return (
+        <FormField
+          label={label}
+          hint={hint}
+          error={error}
+          required={props.required}
+          className={className}
+        >
+          {phoneElement}
+        </FormField>
+      );
+    }
+
+    return phoneElement;
   }
 );
 PhoneField.displayName = 'PhoneField';
 
-export interface CheckboxProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'type'> {
-  label: React.ReactNode;
+export interface CheckboxProps extends React.InputHTMLAttributes<HTMLInputElement> {
+  label: string;
+  description?: string;
 }
 
 export const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
-  ({ label, id, className = '', ...props }, ref) => {
+  ({ label, description, className = '', id, ...props }, ref) => {
     const generatedId = useId();
     const inputId = id || generatedId;
 
     return (
-      <label htmlFor={inputId} className={`flex items-start gap-3 cursor-pointer select-none ${className}`}>
-        <input
-          ref={ref}
-          id={inputId}
-          type="checkbox"
-          className="mt-0.5 w-5 h-5 rounded border border-border text-accent focus-ring transition cursor-pointer"
-          {...props}
-        />
-        <span className="text-sm text-ink font-medium leading-tight">{label}</span>
-      </label>
+      <div className={`flex items-start gap-3 select-none ${className}`}>
+        <div className="flex items-center h-5">
+          <input
+            ref={ref}
+            id={inputId}
+            type="checkbox"
+            className="w-4 h-4 rounded border-border text-accent focus:ring-accent focus:ring-offset-surface cursor-pointer"
+            {...props}
+          />
+        </div>
+        <div className="flex flex-col">
+          <label htmlFor={inputId} className="text-sm font-medium text-ink cursor-pointer">
+            {label}
+          </label>
+          {description && <p className="text-xs text-ink-muted mt-0.5">{description}</p>}
+        </div>
+      </div>
     );
   }
 );
@@ -198,7 +282,7 @@ export interface SwitchProps {
 
 export const Switch: React.FC<SwitchProps> = ({ checked, onChange, label, disabled = false }) => {
   return (
-    <label className="flex items-center gap-3 cursor-pointer select-none">
+    <label className="inline-flex items-center gap-3 cursor-pointer select-none">
       <button
         type="button"
         role="switch"

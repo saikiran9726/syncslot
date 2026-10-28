@@ -1,13 +1,21 @@
+// SlotSync Main Application Router & Shell
+
 import React, { useState, useEffect } from 'react';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { PublicLayout } from './components/layouts/PublicLayout';
 import { OwnerLayout } from './components/layouts/OwnerLayout';
-import { EmptyState } from './components/ui/Feedback';
 import { DevStyleguidePage } from './pages/DevStyleguidePage';
-import { Calendar, Users, Scissors, Star, Bell, Settings, LayoutDashboard, Clock } from 'lucide-react';
+import { RegisterPage } from './pages/RegisterPage';
+import { LoginPage } from './pages/LoginPage';
+import { OnboardingPage } from './pages/OnboardingPage';
+import { SettingsPage } from './pages/SettingsPage';
+import { PublicBookingPage } from './pages/PublicBookingPage';
+import { EmptyState } from './components/ui/Feedback';
 
-export const App: React.FC = () => {
+const RouterContent: React.FC = () => {
+  const { user, business, isLoading } = useAuth();
   const [currentPath, setCurrentPath] = useState(
-    typeof window !== 'undefined' ? window.location.pathname || '/' : '/'
+    typeof window !== 'undefined' ? window.location.pathname : '/'
   );
 
   useEffect(() => {
@@ -16,84 +24,102 @@ export const App: React.FC = () => {
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
 
-  const navigate = (path: string) => {
-    window.history.pushState({}, '', path);
-    setCurrentPath(path);
-    window.scrollTo(0, 0);
-  };
-
-  // 1. Dev Styleguide Route (Excluded in prod, enabled for development)
-  if (currentPath === '/dev/styleguide' || currentPath === '/') {
+  // Simple client-side routing
+  if (currentPath === '/dev/styleguide') {
     return <DevStyleguidePage />;
   }
 
-  // 2. Public Booking Route (/b/:slug or /b/:slug/manage/:token)
-  if (currentPath.startsWith('/b/')) {
-    const isManage = currentPath.includes('/manage/');
-    return (
-      <PublicLayout businessName="Luxe Salon & Spa" businessAddress="MG Road, Bangalore · +91 98765 43210">
-        <EmptyState
-          title={isManage ? 'Customer Self-Service Manage' : 'Mobile Booking Experience'}
-          reason={
-            isManage
-              ? 'Self-service rescheduling and cancellation with secure tokens is scheduled for Phase 4.'
-              : 'The 4-step mobile-first customer booking journey will be implemented in Phase 4.'
-          }
-          icon={<Clock className="w-8 h-8" />}
-          action={{
-            label: 'View Component Styleguide',
-            onClick: () => navigate('/dev/styleguide'),
-          }}
-        />
-      </PublicLayout>
-    );
+  if (currentPath === '/register') {
+    return <RegisterPage />;
   }
 
-  // 3. Owner Dashboard Shell (/app/*)
-  if (currentPath.startsWith('/app') || currentPath === '/login' || currentPath === '/register') {
-    const screenMap: Record<string, { title: string; phase: string; icon: React.ReactNode }> = {
-      '/app/today': { title: 'Today Command Center & Needs Attention', phase: 'Phase 5', icon: <LayoutDashboard className="w-8 h-8" /> },
-      '/app/calendar': { title: 'Interactive Calendar (Day / Week / Agenda)', phase: 'Phase 5', icon: <Calendar className="w-8 h-8" /> },
-      '/app/bookings': { title: 'Appointment Master List & Quick Add', phase: 'Phase 5', icon: <Clock className="w-8 h-8" /> },
-      '/app/customers': { title: 'Customer Directory & Chronological Timeline', phase: 'Phase 6', icon: <Users className="w-8 h-8" /> },
-      '/app/services': { title: 'Services Catalog & Minor Units Pricing', phase: 'Phase 3', icon: <Scissors className="w-8 h-8" /> },
-      '/app/reviews': { title: 'Verified Customer Reviews & Replies', phase: 'Phase 8', icon: <Star className="w-8 h-8" /> },
-      '/app/notifications': { title: 'Reminder Health Panel & Outbox', phase: 'Phase 7', icon: <Bell className="w-8 h-8" /> },
-      '/app/settings': { title: 'Business Profile & Policy Configuration', phase: 'Phase 3', icon: <Settings className="w-8 h-8" /> },
+  if (currentPath === '/login') {
+    return <LoginPage />;
+  }
+
+  if (currentPath === '/onboarding') {
+    return <OnboardingPage />;
+  }
+
+  // Public Booking Route: /b/:slug
+  const publicBookingMatch = currentPath.match(/^\/b\/([a-z0-9-]+)/);
+  if (publicBookingMatch) {
+    const slug = publicBookingMatch[1];
+    return <PublicBookingPage slug={slug} />;
+  }
+
+  // Owner App Routes: /app/*
+  if (currentPath.startsWith('/app')) {
+    if (currentPath === '/app/settings') {
+      return (
+        <OwnerLayout currentPath={currentPath}>
+          <SettingsPage />
+        </OwnerLayout>
+      );
+    }
+
+    // Informative empty state for upcoming phases
+    const tabName = currentPath.replace('/app/', '').replace('/', '');
+    const phaseNames: Record<string, string> = {
+      today: 'Phase 5: Owner Command Center & Today Panel',
+      calendar: 'Phase 5: Visual Schedule & Quick Add Intake',
+      customers: 'Phase 6: Customer Directory & History Timeline',
+      notifications: 'Phase 7: Notification Job Status & Resend Delivery',
+      analytics: 'Phase 8: Verified Analytics & Tenant CSV Export',
     };
 
-    const currentScreen = screenMap[currentPath] || {
-      title: 'Owner Command Center',
-      phase: 'Phase 5',
-      icon: <LayoutDashboard className="w-8 h-8" />,
-    };
+    const targetPhase = phaseNames[tabName] || 'Subsequent Implementation Phase';
 
     return (
-      <OwnerLayout
-        activePath={currentPath}
-        onNavigate={navigate}
-        businessName="Luxe Salon & Spa"
-        isDemo={true}
-      >
-        <EmptyState
-          title={currentScreen.title}
-          reason={`This operational view will be fully connected in ${currentScreen.phase}. Design system and shell layout verified.`}
-          icon={currentScreen.icon}
-          action={{
-            label: 'Return to Styleguide',
-            onClick: () => navigate('/dev/styleguide'),
-          }}
-        />
+      <OwnerLayout currentPath={currentPath}>
+        <div className="p-8 max-w-4xl mx-auto">
+          <EmptyState
+            title={`${tabName.charAt(0).toUpperCase() + tabName.slice(1)} Module`}
+            description={`This dashboard operational surface is scheduled for ${targetPhase}.`}
+            actionLabel="Go to Settings & Configuration"
+            onAction={() => {
+              window.history.pushState({}, '', '/app/settings');
+              setCurrentPath('/app/settings');
+            }}
+          />
+        </div>
       </OwnerLayout>
     );
   }
 
+  // Root redirect
+  if (currentPath === '/') {
+    if (isLoading) {
+      return (
+        <div className="min-h-screen bg-surface flex items-center justify-center">
+          <div className="text-center font-serif text-2xl text-ink animate-pulse">SlotSync</div>
+        </div>
+      );
+    }
+    if (user) {
+      window.location.href = business && business.onboarding_step < 4 ? '/onboarding' : '/app/settings';
+      return null;
+    }
+    return <LoginPage />;
+  }
+
   return (
-    <div className="p-8 text-center">
-      <h1 className="font-display text-2xl">Page Not Found</h1>
-      <button onClick={() => navigate('/dev/styleguide')} className="mt-4 text-accent underline">
-        Go to Styleguide
-      </button>
+    <div className="min-h-screen bg-surface flex flex-col items-center justify-center p-4 text-center">
+      <h1 className="font-serif text-3xl text-ink">404 - Not Found</h1>
+      <p className="text-sm text-ink-muted mt-2">The requested page does not exist.</p>
+      <a href="/login" className="mt-4 text-sm text-accent hover:underline font-medium">
+        Go to Login
+      </a>
     </div>
   );
 };
+
+export const App: React.FC = () => {
+  return (
+    <AuthProvider>
+      <RouterContent />
+    </AuthProvider>
+  );
+};
+
+export default App;

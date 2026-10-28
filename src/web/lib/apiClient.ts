@@ -103,3 +103,63 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
     );
   }
 }
+
+export interface ApiResponse<T> {
+  data: T | null;
+  error: ApiError | null;
+}
+
+export const apiClient = {
+  get: async <T>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> => {
+    try {
+      const data = await apiFetch<T>(path, { ...options, method: 'GET' });
+      return { data, error: null };
+    } catch (err: any) {
+      return { data: null, error: err as ApiError };
+    }
+  },
+  post: async <T>(path: string, body?: any, options?: RequestOptions): Promise<ApiResponse<T>> => {
+    try {
+      const data = await apiFetch<T>(path, {
+        ...options,
+        method: 'POST',
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { data, error: null };
+    } catch (err: any) {
+      return { data: null, error: err as ApiError };
+    }
+  },
+  patch: async <T>(path: string, body?: any, options?: RequestOptions): Promise<ApiResponse<T>> => {
+    try {
+      const data = await apiFetch<T>(path, {
+        ...options,
+        method: 'PATCH',
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { data, error: null };
+    } catch (err: any) {
+      return { data: null, error: err as ApiError };
+    }
+  },
+  put: async <T>(path: string, body?: any, options?: RequestOptions): Promise<ApiResponse<T>> => {
+    try {
+      const data = await apiFetch<T>(path, {
+        ...options,
+        method: 'PUT',
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      return { data, error: null };
+    } catch (err: any) {
+      return { data: null, error: err as ApiError };
+    }
+  },
+  delete: async <T>(path: string, options?: RequestOptions): Promise<ApiResponse<T>> => {
+    try {
+      const data = await apiFetch<T>(path, { ...options, method: 'DELETE' });
+      return { data, error: null };
+    } catch (err: any) {
+      return { data: null, error: err as ApiError };
+    }
+  },
+};

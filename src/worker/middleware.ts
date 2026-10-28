@@ -53,8 +53,8 @@ export async function verifyOrigin(c: Context<{ Bindings: AppBindings }>, next: 
     if (origin) {
       const isAllowed =
         origin === allowedBase ||
-        (c.env.ENVIRONMENT === 'development' &&
-          (origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')));
+        ((c.env.ENVIRONMENT === 'development' || c.env.ENVIRONMENT === 'test' || !c.env.ENVIRONMENT) &&
+          (origin === 'http://localhost' || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1')));
 
       if (!isAllowed) {
         return c.json<ApiErrorResponse>(

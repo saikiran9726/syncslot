@@ -1,9 +1,9 @@
 # 04 — Progress & Implementation Checklist
 
 **Project:** SlotSync  
-**Current Phase:** Phase 2 Completed  
-**Last Updated:** 2026-10-28 19:45 IST  
-**Overall Completion:** 2 / 45 Requirements (Design System & UI Primitives Operational)
+**Current Phase:** Phase 3 Completed  
+**Last Updated:** 2026-10-28 20:12 IST  
+**Overall Completion:** 12 / 45 Requirements (Auth, Onboarding, Configuration & Sharing Complete)
 
 ---
 
@@ -11,8 +11,10 @@
 
 | Screen / Journey | Target Route | Target Phase | Status | Notes |
 | :--- | :--- | :--- | :--- | :--- |
-| **Auth: Owner Registration** | `/register` | Phase 3 | `[ ] Not Started` | Business signup with timezone & phone |
-| **Auth: Owner Login** | `/login` | Phase 3 | `[ ] Not Started` | Password verification & secure session |
+| **Auth: Owner Registration** | `/register` | Phase 3 | `[x] Completed` | Business signup with timezone, preset & slug |
+| **Auth: Owner Login** | `/login` | Phase 3 | `[x] Completed` | Password verification, generic error & rate limit |
+| **Onboarding: 4-Step Resumable Wizard** | `/onboarding` | Phase 3 | `[x] Completed` | Basics, services, hours, publish review |
+| **Public: Business Profile Shell** | `/b/:slug` | Phase 3 | `[x] Completed` | Header, services in INR, publish gate check |
 | **Public: Mobile Booking Flow (4 Steps)** | `/book/:slug` | Phase 4 | `[ ] Not Started` | Service $\rightarrow$ Slot $\rightarrow$ Intake Form $\rightarrow$ Confirm |
 | **Public: Booking Confirmation** | `/book/:slug/confirmed` | Phase 4 | `[ ] Not Started` | Reference code, visit instructions, add-to-calendar |
 | **Public: Manage Booking (Self-Service)** | `/manage/:token` | Phase 4 | `[ ] Not Started` | Reschedule & cancellation with policy check |
@@ -23,9 +25,9 @@
 | **Dashboard: Customers Directory** | `/dashboard/customers` | Phase 6 | `[ ] Not Started` | Search by name/phone, customer stats summary |
 | **Dashboard: Customer Profile Timeline** | `/dashboard/customers/:id` | Phase 6 | `[ ] Not Started` | Chronological appointment timeline, Book Again |
 | **Dashboard: Notifications Health Panel** | `/dashboard/notifications` | Phase 7 | `[ ] Not Started` | Scheduled, sent, failed reminders; manual fallback |
-| **Dashboard: Services Manager** | `/dashboard/services` | Phase 3 | `[ ] Not Started` | Duration, buffer, minor units pricing |
-| **Dashboard: Settings & Operating Hours** | `/dashboard/settings` | Phase 3 | `[ ] Not Started` | Hours, breaks, holidays, timezone, policies |
-| **Dashboard: Share & QR Code Panel** | `/dashboard/share` | Phase 3 / 8 | `[ ] Not Started` | Downloadable QR code, social templates, iframe code |
+| **Dashboard: Services Manager** | `/app/settings` (Tab 2) | Phase 3 | `[x] Completed` | Create, edit, archive; duration, buffer, paise |
+| **Dashboard: Settings & Operating Hours** | `/app/settings` (Tabs 1, 3, 4) | Phase 3 | `[x] Completed` | Hours, holidays, timezone, booking policies |
+| **Dashboard: Share & QR Code Panel** | `/app/settings` (Tab 5) | Phase 3 | `[x] Completed` | Client-side QR (PNG/SVG) with ?src=qr & templates |
 | **Dashboard: Reviews & Moderation** | `/dashboard/reviews` | Phase 8 | `[ ] Not Started` | Verified reviews, owner reply, moderation |
 | **Dashboard: Stored-Data Analytics** | `/dashboard/analytics` | Phase 8 | `[ ] Not Started` | Utilization, completions, repeat rate, zero synthetic |
 
@@ -34,12 +36,12 @@
 ## 2. Requirements Checklist by Priority
 
 ### Priority P0 (Absolute MVP / Demo Cut Line — 28 Items)
-- [ ] **A1:** Registration, login, secure session (Phase 3)
-- [ ] **A3:** Business profile, branding, contact info, slug URL (Phase 3)
-- [ ] **A4:** Services: duration, buffer, price in minor units (Phase 3)
-- [ ] **A6:** Hours, breaks, holidays, blocked periods (Phase 3)
-- [ ] **A7:** Timezone, booking and cancellation policies (Phase 3)
-- [ ] **A8:** Public booking URL and QR generator (Phase 3)
+- [x] **A1:** Registration, login, secure session (Phase 3)
+- [x] **A3:** Business profile, branding, contact info, slug URL (Phase 3)
+- [x] **A4:** Services: duration, buffer, price in minor units (Phase 3)
+- [x] **A6:** Hours, breaks, holidays, blocked periods (Phase 3)
+- [x] **A7:** Timezone, booking and cancellation policies (Phase 3)
+- [x] **A8:** Public booking URL and QR generator (Phase 3)
 - [ ] **B1:** Mobile public booking page (4 steps at 375px) (Phase 4)
 - [ ] **B2:** Live slot availability engine (Phase 4)
 - [ ] **B3:** Contact form, note, Zod validation (Phase 4)
@@ -67,15 +69,15 @@
 - [ ] **H2:** Zero synthetic / invented analytics metrics guarantee (Phase 8)
 - [ ] **S1:** Strict multi-tenant isolation on all APIs (Phase 9)
 - [ ] **S2:** Operational audit logging of mutations (Phase 5–7)
-- [ ] **S4:** Secure password hashing & HTTP-only cookies (Phase 3)
+- [x] **S4:** Secure password hashing & HTTP-only cookies (Phase 3)
 - [x] **U1:** Mobile-first responsive design system (Phase 2)
 - [ ] **U2:** Clearly labelled demo data seeder (Phase 11)
 - [x] **U3:** State coverage: skeletons, empty, error, offline (Phase 2)
 
 ### Priority P1 (High-Value Polish & Secondary Workflows — 16 Items)
-- [ ] **A2:** Industry presets (Salon, Clinic, Tutor) (Phase 3)
-- [ ] **A3a:** Accessibility information on public profile (Phase 3)
-- [ ] **A5:** Staff / resource selector & eligibility (Phase 3)
+- [x] **A2:** Industry presets (Salon, Clinic, Tutor) (Phase 3)
+- [x] **A3a:** Accessibility information on public profile (Phase 3)
+- [x] **A5:** Staff / resource selector & eligibility (Phase 3)
 - [ ] **B4 (Mode):** Owner approval mode toggle & pending flow (Phase 4)
 - [ ] **B7:** Alternative slots UI on 409 conflict (Phase 4)
 - [ ] **C4:** Needs Attention operational panel (Phase 5)
@@ -104,7 +106,7 @@
 | **Phase 0** | Repository Inspection & Requirement Lock | **COMPLETED** |
 | **Phase 1** | Architecture & Data Foundation (Vite + Worker + D1 + Vitest) | **COMPLETED** |
 | **Phase 2** | Design System & UI Primitive Foundation | **COMPLETED** |
-| **Phase 3** | Authentication & Business Setup | *Queued* |
+| **Phase 3** | Authentication & Business Setup | **COMPLETED** |
 | **Phase 4** | Customer Booking Engine & Concurrency Safety | *Queued* |
 | **Phase 5** | Owner Command Center & Booking Operations | *Queued* |
 | **Phase 6** | Customer Directory, Profile & Chronological Timeline | *Queued* |
@@ -227,3 +229,79 @@ pnpm build
   - Operating hours, breaks, and holiday exception editor.
   - Services manager: create/edit services with duration, buffer time, and price in integer paise.
   - Public booking URL generator and SVG QR code card.
+
+---
+
+## 6. Phase 3 Handoff
+
+### What Exists
+1. **Authentication & Session System:**
+   - Registration (`POST /api/auth/register`): Enforces minimum 10-character passwords, validates and prevents reserved slugs (`app`, `api`, `admin`, etc.), generates unique salts, hashes passwords with WebCrypto PBKDF2-SHA256 (100k iterations), atomically provisions business, default primary staff resource, default 7-day working hours schedule, and seeds preset starting services. Sets HttpOnly, SameSite=Lax session cookie.
+   - Login (`POST /api/auth/login`): Protected by D1-backed privacy-safe rate limiting (5 attempts per 15-minute window per IP/email bucket hash with `Retry-After` header). Verifies credentials via constant-time compare; returns generic error messages to eliminate email enumeration; issues 30-day session tokens.
+   - Logout (`POST /api/auth/logout`) and Session (`GET /api/auth/me`).
+2. **Business Configuration & Settings API:**
+   - `GET /api/owner/business` & `PATCH /api/owner/business`: Business profile, timezone (validated against IANA list), contact info, booking horizon, notice limits, cancellation policy text, and publish gate controls.
+   - `GET /api/owner/services`, `POST /api/owner/services`, `PATCH /api/owner/services/:id`, `DELETE /api/owner/services/:id`: Full service catalog management with duration, buffer, and price stored in integer paise. Soft-archives services when historical or active bookings exist.
+   - `GET /api/owner/hours` & `PUT /api/owner/hours`: Weekly schedule editor enforcing 15-minute alignment, end-after-start constraints, and internal overlap checks.
+   - `breaks` & `holidays` endpoints for date and intra-day closures.
+   - Tamper-evident operational `audit_log` recording for all settings and catalog changes.
+   - Multi-tenant isolation: strict resolution via session token; cross-tenant modification or leakage is prevented (404/403). Role permissions: staff membership can read catalog but is forbidden (403) from mutating business profile, services, or hours.
+3. **Publishing Gate & Public Profile Shell:**
+   - `GET /api/public/business/:slug`: Public customer endpoint. Returns 404 neutral placeholder if business is unpublished (`published = 0`). Returns business profile, policies, and active bookable services in INR (₹) when published.
+   - Publish Gate: Enforces that business must have $\ge 1$ active service and $\ge 1$ open working hours interval before publishing.
+4. **Interactive Frontend Screens (`src/web/`):**
+   - `/register`: Registration page with real-time slug generator, reserved slug validation, preset picker (Salon, Clinic, Tutor), searchable timezone selector, and 10-character password meter.
+   - `/login`: Clean login form with generic error alerts and clear notice on password self-reset limitations.
+   - `/onboarding`: 4-step resumable onboarding wizard (persisted to `businesses.onboarding_step`):
+     - Step 1: Basics & Timezone
+     - Step 2: Service Catalog & Starting Presets
+     - Step 3: Operating Hours with "Copy Mon to all" and "Closed" toggles
+     - Step 4: Review, Publish Gate check, and public page launch
+   - `/app/settings`: Full owner settings center with 5 tabs: Profile, Services, Hours & Holidays, Policies, and Share & QR Code.
+   - `/b/:slug`: Public customer booking profile shell with subtle warm brand wash, business details, active services list, and responsive mobile-first layout.
+5. **Marketing Distribution & QR Code Generator:**
+   - Live client-side QR generator via `qrcode` package with error correction level M.
+   - Instant "Download PNG" and "Download SVG" buttons.
+   - Prefilled social distribution templates with whitelisted marketing source tags (`?src=qr`, `?src=whatsapp`, `?src=instagram`, `?src=website`, `?src=link`).
+   - One-click copy buttons with interactive toast notifications.
+6. **Automated Verification:**
+   - 9 test files, 41 passing automated tests in Vitest:
+     - `tests/auth_api.test.ts` (5 tests)
+     - `tests/tenant_isolation.test.ts` (2 tests)
+     - `tests/business_config.test.ts` (3 tests)
+     - `tests/qr_code.test.ts` (2 tests: proves QR generation and PNG decode via `jsqr` round-trips to exact URL with `?src=qr`)
+     - `tests/wizard_ui.test.tsx` (2 tests)
+     - `tests/schema_and_constraints.test.ts` (7 tests)
+     - `tests/concurrency_slot_cells.test.ts` (1 test)
+     - `tests/auth_crypto.test.ts` (8 tests)
+     - `tests/components.test.tsx` (11 tests)
+   - `pnpm typecheck` (tsc --noEmit): 0 errors.
+   - `pnpm build` (vite build): Produces production assets in `./dist` in 10s.
+
+### Exact Commands to Run and Verify
+```bash
+# 1. Run full test suite (41 tests across worker, API, isolation, and UI tests)
+pnpm test
+
+# 2. Run TypeScript typecheck
+pnpm typecheck
+
+# 3. Build frontend production assets
+pnpm build
+```
+
+### Known Bugs / Limitations
+- **Staff Invite Flow:** There is no staff invitation UI or email flow in MVP (P2, documented per spec PATCH 3 item A). Staff membership and role permissions are fully enforced in backend middleware and tested.
+- **Forgot Password:** Password self-reset via email is deferred to when production email delivery is configured in later phases; documented as a known gap on the login page copy.
+
+### Key Decisions Made
+- All marketing share links enforce whitelisted `?src=<tag>` parameter to allow server-side zero-tracker attribution in Phase 4 and Phase 8.
+- QR codes are generated client-side with SVG and PNG download options, verified by decoding via `jsqr` in automated tests.
+- Publish Gate strictly prevents publishing businesses without at least 1 service and 1 open working hours interval.
+
+### First Task of Next Phase (Phase 4)
+- Build Phase 4 (Customer Booking Engine & Concurrency Safety):
+  - Live availability engine (`GET /api/public/availability`): calculates available slots for a given date, service, duration, and buffer against working hours, breaks, holidays, and existing reservations.
+  - Public booking wizard (4 steps at 375px: Service $\rightarrow$ Slot $\rightarrow$ Contact Intake Form $\rightarrow$ Confirmation Screen).
+  - Atomic double-booking prevention: batch insertion into `bookings` and `slot_cells(resource_id, cell_start_utc)` with UNIQUE constraint collision handling (returns 409 conflict and alternative slots UI).
+  - Customer self-service reschedule and cancellation flow with secure manage token (`/manage/:token`).

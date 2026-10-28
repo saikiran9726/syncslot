@@ -18,6 +18,7 @@ import { OfflineBanner } from '../ui/Feedback';
 export interface OwnerLayoutProps {
   children: React.ReactNode;
   activePath?: string;
+  currentPath?: string;
   onNavigate?: (path: string) => void;
   businessName?: string;
   isDemo?: boolean;
@@ -37,10 +38,12 @@ export const OWNER_NAV_ITEMS = [
 export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
   children,
   activePath = '/app/today',
+  currentPath,
   onNavigate = (path) => (window.location.hash = path),
   businessName = 'My Business',
   isDemo = false,
 }) => {
+  const effectivePath = currentPath || activePath;
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -91,7 +94,7 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
           </div>
           {OWNER_NAV_ITEMS.map((item) => {
             const Icon = item.icon;
-            const isActive = activePath.startsWith(item.path);
+            const isActive = effectivePath.startsWith(item.path);
             return (
               <button
                 key={item.path}
@@ -128,7 +131,7 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
               </div>
               {OWNER_NAV_ITEMS.map((item) => {
                 const Icon = item.icon;
-                const isActive = activePath.startsWith(item.path);
+                const isActive = effectivePath.startsWith(item.path);
                 return (
                   <button
                     key={item.path}
@@ -164,7 +167,7 @@ export const OwnerLayout: React.FC<OwnerLayoutProps> = ({
       >
         {OWNER_NAV_ITEMS.slice(0, 5).map((item) => {
           const Icon = item.icon;
-          const isActive = activePath.startsWith(item.path);
+          const isActive = effectivePath.startsWith(item.path);
           return (
             <button
               key={item.path}
