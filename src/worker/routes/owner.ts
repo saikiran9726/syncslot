@@ -18,7 +18,7 @@ import {
   MergeCustomerSchema,
   UpdateCustomerSchema,
 } from '../../shared/schemas';
-import { generateUUID, generateReferenceCode, generateSecretToken, sha256Hex } from '../../shared/idUtils';
+import { generateUUID, generateReferenceCode, generateSecretToken, sha256Hex, deriveHmacToken } from '../../shared/idUtils';
 import { recordAuditLog } from '../audit';
 import { validateSlug } from '../../shared/slugUtils';
 import { isValidTimezone } from '../../shared/timezoneUtils';
@@ -1134,11 +1134,12 @@ ownerRouter.post('/bookings', async (c) => {
     );
   }
 
-  // 7. Booking details
+  // 7. Booking details (HMAC-derived token, SEC-04)
   const reference = generateReferenceCode();
-  const rawManageToken = generateSecretToken();
-  const manageTokenHash = await sha256Hex(rawManageToken);
   const bookingId = generateUUID();
+  const tokenSecret = c.env.TOKEN_SECRET || c.env.SESSION_SECRET || 'syncslot_token_secret_fallback';
+  const rawManageToken = await deriveHmacToken(tokenSecret, `${businessId}:${bookingId}`);
+  const manageTokenHash = await sha256Hex(rawManageToken);
 
   statements.push(
     c.env.DB.prepare(

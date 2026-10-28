@@ -8,14 +8,35 @@ import { ERROR_CODES, ApiErrorResponse } from '../../shared/errorCodes';
 import { RegisterInputSchema, LoginInputSchema } from '../../shared/schemas';
 import { generateSalt, hashPassword, verifyPassword } from '../auth';
 import { generateUUID, generateSecretToken, sha256Hex } from '../../shared/idUtils';
-import { checkLoginRateLimit } from '../rateLimiter';
+import { checkLoginRateLimit, checkCustomRateLimit } from '../rateLimiter';
 import { recordAuditLog } from '../audit';
 import { INDUSTRY_PRESETS } from '../../shared/presets';
+
+function getClientIp(c: any): string {
+  return c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for')?.split(',')[0].trim() || '127.0.0.1';
+}
 
 export const authRouter = new Hono<{ Bindings: AppBindings; Variables: AuthContext }>();
 
 // Register new business & owner
 authRouter.post('/register', async (c) => {
+  // Rate Limiting: 5 registrations per hour per IP (SEC-02)
+  const ip = getClientIp(c);
+  const rlSalt = c.env.RATE_LIMIT_SALT || 'salt';
+  const rateCheck = await checkCustomRateLimit(c.env.DB, `register:${ip}`, 5, 3600, rlSalt);
+  if (!rateCheck.allowed) {
+    c.header('Retry-After', String(rateCheck.retryAfterSeconds ?? 3600));
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.RATE_LIMITED,
+          message: 'Too many registration attempts. Please try again later.',
+        },
+      },
+      429
+    );
+  }
+
   const body = await c.req.json().catch(() => null);
   const parsed = RegisterInputSchema.safeParse(body);
 

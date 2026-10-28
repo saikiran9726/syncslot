@@ -53,3 +53,23 @@ export async function sha256Hex(input: string): Promise<string> {
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
+
+/**
+ * Computes an HMAC-SHA256 hex string from a secret and message using WebCrypto.
+ * Used for deterministic manage token derivation.
+ */
+export async function deriveHmacToken(secret: string, message: string): Promise<string> {
+  const enc = new TextEncoder();
+  const keyData = enc.encode(secret);
+  const msgData = enc.encode(message);
+  const key = await crypto.subtle.importKey(
+    'raw',
+    keyData,
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, msgData);
+  const hashArray = Array.from(new Uint8Array(sig));
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}

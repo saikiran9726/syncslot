@@ -5,7 +5,7 @@ import { Hono, Context } from 'hono';
 import { AppBindings, AuthContext } from '../middleware';
 import { ERROR_CODES, ApiErrorResponse } from '../../shared/errorCodes';
 import { PublicCreateBookingSchema, RescheduleBookingSchema, CancelBookingSchema } from '../../shared/schemas';
-import { generateUUID, generateSecretToken, sha256Hex, generateHumanReference } from '../../shared/idUtils';
+import { generateUUID, generateSecretToken, sha256Hex, generateHumanReference, deriveHmacToken } from '../../shared/idUtils';
 import { computeSlotCells } from '../../shared/slotCells';
 import { normalizePhone } from '../../shared/phone';
 import { computeAvailableSlots, findAlternativeSlots, localToUtc, getTimezoneLabel } from '../../shared/availability';
@@ -390,11 +390,12 @@ publicRouter.post('/:slug/bookings', async (c) => {
     );
   }
 
-  // 7. Human reference code & Secret Manage Token
+  // 7. Human reference code & Secret Manage Token (HMAC-derived, SEC-04)
   const reference = generateHumanReference();
-  const rawManageToken = generateSecretToken();
-  const manageTokenHash = await sha256Hex(rawManageToken);
   const bookingId = generateUUID();
+  const tokenSecret = c.env.TOKEN_SECRET || c.env.SESSION_SECRET || 'syncslot_token_secret_fallback';
+  const rawManageToken = await deriveHmacToken(tokenSecret, `${business.id}:${bookingId}`);
+  const manageTokenHash = await sha256Hex(rawManageToken);
 
   // Determine initial status (instant = confirmed; approval = pending)
   const bookingStatus = business.booking_mode === 'approval' ? 'pending' : 'confirmed';
@@ -543,8 +544,9 @@ publicRouter.get('/:slug/manage/:token', async (c) => {
   const slug = (c.req.param('slug') || '').toLowerCase().trim();
   const token = c.req.param('token') || '';
 
-  // Security headers per Patch 4 Item H
+  // Security headers per Patch 4 Item H & SEC-07
   c.header('Cache-Control', 'no-store');
+  c.header('Pragma', 'no-cache');
   c.header('Referrer-Policy', 'no-referrer');
 
   // Rate Limiting: 30 requests / min
@@ -603,7 +605,16 @@ publicRouter.post('/:slug/manage/:token/cancel', async (c) => {
   const parsed = CancelBookingSchema.safeParse(body);
 
   c.header('Cache-Control', 'no-store');
+  c.header('Pragma', 'no-cache');
   c.header('Referrer-Policy', 'no-referrer');
+
+  // Rate Limiting: 20 mutation attempts / min per IP (SEC-03)
+  const ip = getClientIp(c);
+  const salt = c.env.RATE_LIMIT_SALT || 'salt';
+  const rateCheck = await checkCustomRateLimit(c.env.DB, `manage_mutate:${ip}`, 20, 60, salt);
+  if (!rateCheck.allowed) {
+    return c.json<ApiErrorResponse>({ error: { code: ERROR_CODES.RATE_LIMITED, message: 'Too many requests' } }, 429);
+  }
 
   const tokenHash = await sha256Hex(token);
 
@@ -708,7 +719,16 @@ publicRouter.post('/:slug/manage/:token/reschedule', async (c) => {
   }
 
   c.header('Cache-Control', 'no-store');
+  c.header('Pragma', 'no-cache');
   c.header('Referrer-Policy', 'no-referrer');
+
+  // Rate Limiting: 20 mutation attempts / min per IP (SEC-03)
+  const ip = getClientIp(c);
+  const salt = c.env.RATE_LIMIT_SALT || 'salt';
+  const rateCheck = await checkCustomRateLimit(c.env.DB, `manage_mutate:${ip}`, 20, 60, salt);
+  if (!rateCheck.allowed) {
+    return c.json<ApiErrorResponse>({ error: { code: ERROR_CODES.RATE_LIMITED, message: 'Too many requests' } }, 429);
+  }
 
   const { new_start_at_utc } = parsed.data;
   const tokenHash = await sha256Hex(token);
@@ -844,11 +864,13 @@ publicRouter.post('/:slug/manage/:token/opt-out', async (c) => {
   const token = c.req.param('token') || '';
 
   c.header('Cache-Control', 'no-store');
+  c.header('Pragma', 'no-cache');
   c.header('Referrer-Policy', 'no-referrer');
 
+  // Rate Limiting: 20 mutation attempts / min per IP (SEC-03)
   const ip = getClientIp(c);
   const salt = c.env.RATE_LIMIT_SALT || 'salt';
-  const rateCheck = await checkCustomRateLimit(c.env.DB, `optout:${ip}`, 30, 60, salt);
+  const rateCheck = await checkCustomRateLimit(c.env.DB, `optout:${ip}`, 20, 60, salt);
   if (!rateCheck.allowed) {
     return c.json<ApiErrorResponse>({ error: { code: ERROR_CODES.RATE_LIMITED, message: 'Too many requests' } }, 429);
   }

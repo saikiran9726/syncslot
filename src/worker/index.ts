@@ -12,6 +12,22 @@ import { processNotificationQueue } from './notifications/jobProcessor';
 const app = new Hono<{ Bindings: AppBindings; Variables: AuthContext }>();
 
 // Global Middleware
+// SEC-05: Enforce RATE_LIMIT_SALT requirement in production
+app.use('*', async (c, next) => {
+  if (c.env.ENVIRONMENT === 'production' && !c.env.RATE_LIMIT_SALT) {
+    console.error('[FATAL] RATE_LIMIT_SALT is required in production environment.');
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.INTERNAL,
+          message: 'Server configuration error: RATE_LIMIT_SALT required in production',
+        },
+      },
+      500
+    );
+  }
+  await next();
+});
 app.use('*', securityHeaders);
 app.use('*', verifyOrigin);
 

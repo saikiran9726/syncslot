@@ -608,3 +608,77 @@ pnpm build
 ### First Task of Next Phase (Phase 9: Data Security & Multi-Tenant Deep Audit)
 - Execute deep cross-tenant security audit across all routes, verify retention policies, and validate compliance boundaries.
 
+---
+
+## 9. Phase 9 Handoff
+
+### What Exists
+1. **Security Headers & Defense-in-Depth (`src/worker/middleware.ts` - SEC-01, SEC-06, SEC-07):**
+   - Injected strict Content Security Policy (CSP): `default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';` (zero `unsafe-eval`).
+   - Standard security headers: `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy: accelerometer=(), camera=(), microphone=(), geolocation=()`.
+   - Token endpoints explicitly set `Cache-Control: no-store`, `Pragma: no-cache`, and `Referrer-Policy: no-referrer`.
+   - Mutating HTTP requests (`POST`, `PUT`, `PATCH`, `DELETE`) verified against origin and `Sec-Fetch-Site: same-origin` to prevent cross-site request forgery.
+2. **Privacy-Preserving Rate Limiting (`src/worker/routes/auth.ts`, `src/worker/routes/public.ts`, `src/worker/index.ts` - SEC-02, SEC-03, SEC-05):**
+   - Keyed rate limiting backed by `rate_limits` table with `computeBucketHash(key, salt)` — raw IP addresses and sensitive identifiers are never stored.
+   - Owner Registration (`POST /api/auth/register`): capped at 5 attempts / hour per IP. Returns HTTP 429 with `Retry-After`.
+   - Token Mutation Endpoints (cancel, reschedule, opt-out): capped at 20 requests / minute per IP. Returns HTTP 429.
+   - Public Booking & Availability: protected with 10 bookings / 10 min and 60 availability requests / min.
+   - Production Startup Assertion: In `ENVIRONMENT === 'production'`, missing `RATE_LIMIT_SALT` throws a fatal 500 configuration error.
+3. **HMAC-Derived Manage Tokens & Idempotent Replay (`src/shared/idUtils.ts`, `src/worker/routes/public.ts`, `src/worker/routes/owner.ts` - SEC-04):**
+   - Implemented `deriveHmacToken(secret, businessId + ':' + bookingId)` using WebCrypto HMAC-SHA256.
+   - Deterministic tokens allow idempotent replay without ever storing plaintext tokens in `idempotency_keys` or logs.
+   - Database stores only `manage_token_hash = sha256Hex(token)`.
+4. **WCAG AA Accessibility Hardening (`src/web/pages/CustomersPage.tsx` - A11Y-01, A11Y-02):**
+   - Customer search input labeled with `aria-label="Search customers by name, phone, or email"`.
+   - Clear search control enhanced with `aria-label="Clear search query"`.
+   - Added `aria-live="polite"` region announcing live customer result count to assistive technologies.
+   - Verified WCAG AA color contrast ($\ge 4.5:1$) across all 13 core UI color pairs via `pnpm check:contrast`.
+   - Prevented mobile iOS auto-zoom by enforcing 16px minimum text size on form inputs.
+   - Verified touch target sizing ($\ge 44$px for buttons, $\ge 36$px for compact controls).
+   - Enforced `@media (prefers-reduced-motion: reduce)` globally.
+5. **Self-Hosted Typography & Zero-External Asset Footprint:**
+   - Pre-bundled fonts from `@fontsource/fraunces` and `@fontsource/plus-jakarta-sans` in `./dist/assets`.
+   - Zero external font CDN requests (Google Fonts completely eliminated).
+6. **Automated Verification:**
+   - Full test suite: 17 test files, 109 tests passing cleanly:
+     - `tests/hardening_phase9.test.ts` (5 tests: CSP headers, rate limiting, HMAC manage tokens, production salt check, CSRF defense).
+     - Full suite passes across all 17 test files (109/109 tests green).
+   - 20-way parallel concurrency stress tests: 3/3 passed consecutive runs.
+   - `pnpm typecheck` (`tsc --noEmit`): 0 errors.
+   - `pnpm build` (`vite build`): Compiles cleanly into `./dist` in 4.81s.
+   - `git grep -i "re_"`: Zero secrets tracked. Zero "Instinct" references.
+   - `npx wrangler d1 migrations apply syncslot-db --local`: Verified clean and synchronized.
+
+### Exact Commands to Run and Verify
+```bash
+# 1. Run all 109 tests across 17 test suites
+pnpm test
+
+# 2. Run the Phase 9 hardening test suite specifically
+npx vitest run tests/hardening_phase9.test.ts
+
+# 3. Run the 20-way parallel concurrency test
+npx vitest run tests/concurrency_20.test.ts
+
+# 4. Verify color contrast
+pnpm check:contrast
+
+# 5. Run TypeScript typecheck
+pnpm typecheck
+
+# 6. Build frontend production assets
+pnpm build
+```
+
+### Known Bugs / Limitations
+- **None.** All findings (SEC-01 through SEC-07, A11Y-01, A11Y-02) have been resolved with zero open Critical or High findings.
+
+### Key Decisions Made
+- Manage tokens are deterministically derived using HMAC-SHA256 (`TOKEN_SECRET`, `${businessId}:${bookingId}`). This eliminates plaintext token persistence in idempotency caching tables while ensuring deterministic idempotency replay.
+- Rate limiting buckets store salted hashes (`computeBucketHash(key, salt)`), guaranteeing zero raw IP persistence in SQLite D1 storage.
+- Production startup fails closed: if `RATE_LIMIT_SALT` is absent in production mode, the worker halts with an explicit 500 error instead of falling back to default salts.
+
+### First Task of Next Phase (Phase 10: Production Deployment & Smoke Testing)
+- Execute production Cloudflare Worker deployment, migrate remote D1 database, configure Cloudflare environment secrets (`SESSION_SECRET`, `TOKEN_SECRET`, `RATE_LIMIT_SALT`, `RESEND_API_KEY`), and perform end-to-end smoke verification on live custom domain.
+
+

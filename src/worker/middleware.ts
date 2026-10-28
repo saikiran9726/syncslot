@@ -17,6 +17,7 @@ export interface AppBindings {
   EMAIL_FROM: string;
   RATE_LIMIT_SALT: string;
   SESSION_SECRET: string;
+  TOKEN_SECRET?: string;
   RESEND_API_KEY?: string;
 }
 
@@ -38,6 +39,10 @@ export async function securityHeaders(c: Context, next: Next) {
   c.header('X-Frame-Options', 'DENY');
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin');
   c.header('Permissions-Policy', 'accelerometer=(), camera=(), microphone=(), geolocation=()');
+  c.header(
+    'Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self';"
+  );
 }
 
 /**
@@ -57,6 +62,19 @@ export async function verifyOrigin(c: Context<{ Bindings: AppBindings }>, next: 
           (origin === 'http://localhost' || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1')));
 
       if (!isAllowed) {
+        return c.json<ApiErrorResponse>(
+          {
+            error: {
+              code: ERROR_CODES.FORBIDDEN,
+              message: 'Cross-origin request blocked',
+            },
+          },
+          403
+        );
+      }
+    } else if (c.env.ENVIRONMENT === 'production') {
+      const secFetchSite = c.req.header('Sec-Fetch-Site');
+      if (secFetchSite && secFetchSite !== 'same-origin' && secFetchSite !== 'same-site' && secFetchSite !== 'none') {
         return c.json<ApiErrorResponse>(
           {
             error: {

@@ -175,17 +175,22 @@ export const CustomersPage: React.FC = () => {
               setOffset(0);
             }}
             placeholder="Search by name, phone, or email..."
+            aria-label="Search customers by name, phone, or email"
             className="w-full text-xs p-2.5 pl-9 rounded-control border border-border bg-surface text-ink focus-ring"
           />
           <Search className="w-4 h-4 text-ink-muted absolute left-3 top-2.5" />
           {searchTerm && (
             <button
               onClick={() => setSearchTerm('')}
-              className="absolute right-2.5 top-2.5 text-ink-muted hover:text-ink"
+              aria-label="Clear search query"
+              className="absolute right-2.5 top-2.5 text-ink-muted hover:text-ink focus-ring rounded"
             >
               <X className="w-4 h-4" />
             </button>
           )}
+        </div>
+        <div className="sr-only" aria-live="polite" role="status">
+          {isLoading ? 'Loading customers...' : `${totalCount} customers found.`}
         </div>
 
         {/* Filter Pills */}
