@@ -228,6 +228,7 @@ export const UpdateBusinessSettingsSchema = z.object({
   requires_approval: z.number().int().min(0).max(1).optional(),
   published: z.number().int().min(0).max(1).optional(),
   onboarding_step: z.number().int().min(1).max(5).optional(),
+  review_url: z.string().trim().url('Invalid review URL').optional().or(z.literal('')),
 });
 
 export type UpdateBusinessSettingsInput = z.infer<typeof UpdateBusinessSettingsSchema>;

@@ -15,6 +15,7 @@ import {
   ChevronRight,
   AlertCircle,
   X,
+  Download,
 } from 'lucide-react';
 import { Button } from '../components/ui/Button';
 import { StatusBadge } from '../components/ui/StatusBadge';
@@ -108,6 +109,17 @@ export const BookingsListPage: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              window.location.href = '/api/owner/bookings/export';
+            }}
+            title="Download CSV of bookings"
+          >
+            <Download className="w-4 h-4 mr-1.5" />
+            Export CSV
+          </Button>
           <Button
             variant="secondary"
             size="sm"
