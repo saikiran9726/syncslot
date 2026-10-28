@@ -421,37 +421,41 @@ describe('Owner Dashboard, Appointments & Quick Add (C1-C5)', () => {
 
       for (let i = 0; i < 10; i++) {
         promises.push(
-          worker.fetch(
-            new Request('http://localhost/api/owner/bookings', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Cookie: owner.cookie },
-              body: JSON.stringify({
-                service_id: svc.id,
-                start_at_utc: raceSlot,
-                customer_name: `Owner Contender ${i}`,
-                customer_phone: `98765432${String(i).padStart(2, '0')}`,
+          Promise.resolve(
+            worker.fetch(
+              new Request('http://localhost/api/owner/bookings', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Cookie: owner.cookie },
+                body: JSON.stringify({
+                  service_id: svc.id,
+                  start_at_utc: raceSlot,
+                  customer_name: `Owner Contender ${i}`,
+                  customer_phone: `98765432${String(i).padStart(2, '0')}`,
+                }),
               }),
-            }),
-            env
+              env
+            )
           )
         );
       }
 
       for (let i = 10; i < 20; i++) {
         promises.push(
-          app.request(
-            `/api/public/${slug}/bookings`,
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                service_id: svc.id,
-                start_at_utc: raceSlot,
-                customer_name: `Public Contender ${i}`,
-                customer_phone: `+9198765432${String(i).padStart(2, '0')}`,
-              }),
-            },
-            env
+          Promise.resolve(
+            app.request(
+              `/api/public/${slug}/bookings`,
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  service_id: svc.id,
+                  start_at_utc: raceSlot,
+                  customer_name: `Public Contender ${i}`,
+                  customer_phone: `+9198765432${String(i).padStart(2, '0')}`,
+                }),
+              },
+              env
+            )
           )
         );
       }

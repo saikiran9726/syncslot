@@ -23,6 +23,7 @@ import { computeSlotCells } from '../../shared/slotCells';
 import { normalizePhone } from '../../shared/phone';
 import { localToUtc, utcToLocal } from '../../shared/availability';
 import { dispatchBookingNotificationHook } from '../notificationsHook';
+import { processNotificationQueue } from '../notifications/jobProcessor';
 
 export const ownerRouter = new Hono<{ Bindings: AppBindings; Variables: AuthContext }>();
 
@@ -1349,4 +1350,222 @@ ownerRouter.patch('/bookings/:id/status', async (c) => {
   ).bind(bookingId).first();
 
   return c.json({ success: true, booking: updated });
+});
+
+
+// --- 7. NOTIFICATIONS & REMINDER HEALTH (E1-E9) ---
+
+// List notification jobs with filtering and delivery mode banner
+ownerRouter.get('/notifications', async (c) => {
+  const businessId = c.get('business_id');
+  const statusParam = c.req.query('status');
+  const bookingIdParam = c.req.query('booking_id');
+  const limit = Math.min(Number(c.req.query('limit')) || 50, 100);
+  const offset = Number(c.req.query('offset')) || 0;
+
+  // Determine delivery mode: real, sandbox, or dry_run
+  const apiKey = c.env.RESEND_API_KEY?.trim();
+  const pref = await c.env.DB.prepare(
+    'SELECT sandbox_recipient_email FROM notification_preferences WHERE business_id = ?'
+  ).bind(businessId).first<{ sandbox_recipient_email: string | null }>();
+
+  let deliveryMode: 'real' | 'sandbox' | 'dry_run' = 'dry_run';
+  if (apiKey && apiKey !== 'dry-run' && apiKey !== 'test') {
+    deliveryMode = pref?.sandbox_recipient_email ? 'sandbox' : 'real';
+  }
+
+  let sql = `
+    SELECT nj.id, nj.booking_id, nj.booking_version, nj.customer_id, nj.channel,
+           nj.template_key, nj.due_at_utc, nj.status, nj.attempt_count, nj.next_attempt_at,
+           nj.provider_message_id, nj.last_error_category, nj.created_at_utc, nj.updated_at_utc,
+           c.name AS customer_name, c.display_phone AS customer_phone, c.normalized_phone, c.email AS customer_email,
+           b.reference AS booking_reference, b.start_at_utc AS appointment_start_at_utc
+    FROM notification_jobs nj
+    JOIN customers c ON nj.customer_id = c.id
+    JOIN bookings b ON nj.booking_id = b.id
+    WHERE nj.business_id = ?
+  `;
+  const params: any[] = [businessId];
+
+  if (statusParam && statusParam !== 'all') {
+    if (statusParam === 'failed') {
+      sql += ` AND nj.status IN ('failed', 'permanently_failed')`;
+    } else {
+      sql += ` AND nj.status = ?`;
+      params.push(statusParam);
+    }
+  }
+
+  if (bookingIdParam) {
+    sql += ` AND nj.booking_id = ?`;
+    params.push(bookingIdParam);
+  }
+
+  sql += ` ORDER BY nj.due_at_utc DESC LIMIT ? OFFSET ?`;
+  params.push(limit, offset);
+
+  const res = await c.env.DB.prepare(sql).bind(...params).all();
+
+  return c.json({
+    delivery_mode: deliveryMode,
+    sandbox_recipient: pref?.sandbox_recipient_email || null,
+    jobs: res.results || [],
+    limit,
+    offset,
+  });
+});
+
+// Manual retry of a failed or permanently_failed job through the claim function
+ownerRouter.post('/notifications/:id/retry', async (c) => {
+  const businessId = c.get('business_id');
+  const jobId = c.req.param('id');
+
+  const job = await c.env.DB.prepare(
+    'SELECT id, status FROM notification_jobs WHERE id = ? AND business_id = ?'
+  ).bind(jobId, businessId).first<{ id: string; status: string }>();
+
+  if (!job) {
+    return c.json<ApiErrorResponse>({ error: { code: ERROR_CODES.NOT_FOUND, message: 'Notification job not found' } }, 404);
+  }
+
+  const nowIso = new Date().toISOString();
+
+  // Reset to queued and clear lock
+  await c.env.DB.prepare(
+    `UPDATE notification_jobs
+     SET status = 'queued',
+         next_attempt_at = ?,
+         locked_until = NULL,
+         updated_at_utc = ?
+     WHERE id = ? AND business_id = ?`
+  ).bind(nowIso, nowIso, jobId, businessId).run();
+
+  // Execute processing through standard claim function
+  await processNotificationQueue(c.env, 1);
+
+  const updated = await c.env.DB.prepare(
+    `SELECT nj.*, c.name AS customer_name, b.reference AS booking_reference
+     FROM notification_jobs nj
+     JOIN customers c ON nj.customer_id = c.id
+     JOIN bookings b ON nj.booking_id = b.id
+     WHERE nj.id = ?`
+  ).bind(jobId).first();
+
+  return c.json({ success: true, job: updated });
+});
+
+// Get notification preferences & quiet hours
+ownerRouter.get('/notifications/preferences', async (c) => {
+  const businessId = c.get('business_id');
+
+  const [biz, pref, rules] = await Promise.all([
+    c.env.DB.prepare('SELECT quiet_hours_start, quiet_hours_end FROM businesses WHERE id = ?')
+      .bind(businessId)
+      .first<{ quiet_hours_start: string; quiet_hours_end: string }>(),
+    c.env.DB.prepare('SELECT * FROM notification_preferences WHERE business_id = ?')
+      .bind(businessId)
+      .first(),
+    c.env.DB.prepare('SELECT * FROM reminder_rules WHERE business_id = ? ORDER BY offset_minutes DESC')
+      .bind(businessId)
+      .all(),
+  ]);
+
+  return c.json({
+    preferences: pref || {},
+    quiet_hours: {
+      start: biz?.quiet_hours_start || '22:00',
+      end: biz?.quiet_hours_end || '08:00',
+    },
+    reminder_rules: rules.results || [],
+  });
+});
+
+// Update notification preferences & quiet hours
+ownerRouter.patch('/notifications/preferences', async (c) => {
+  const businessId = c.get('business_id');
+  const body = (await c.req.json().catch(() => ({}))) as any;
+  const nowIso = new Date().toISOString();
+
+  const statements: D1PreparedStatement[] = [];
+
+  // Quiet hours update on businesses table
+  if (body.quiet_hours_start !== undefined || body.quiet_hours_end !== undefined) {
+    const qStart = body.quiet_hours_start ?? '22:00';
+    const qEnd = body.quiet_hours_end ?? '08:00';
+    statements.push(
+      c.env.DB.prepare(
+        'UPDATE businesses SET quiet_hours_start = ?, quiet_hours_end = ?, updated_at_utc = ? WHERE id = ?'
+      ).bind(qStart, qEnd, nowIso, businessId)
+    );
+  }
+
+  // Preferences update
+  if (
+    body.enable_email !== undefined ||
+    body.enable_whatsapp_manual !== undefined ||
+    body.sender_name !== undefined ||
+    body.reply_to_email !== undefined ||
+    body.consent_copy_text !== undefined ||
+    body.sandbox_recipient_email !== undefined
+  ) {
+    statements.push(
+      c.env.DB.prepare(
+        `UPDATE notification_preferences
+         SET enable_email = COALESCE(?, enable_email),
+             enable_whatsapp_manual = COALESCE(?, enable_whatsapp_manual),
+             sender_name = COALESCE(?, sender_name),
+             reply_to_email = COALESCE(?, reply_to_email),
+             consent_copy_text = COALESCE(?, consent_copy_text),
+             sandbox_recipient_email = ?,
+             created_at_utc = created_at_utc
+         WHERE business_id = ?`
+      ).bind(
+        body.enable_email !== undefined ? (body.enable_email ? 1 : 0) : null,
+        body.enable_whatsapp_manual !== undefined ? (body.enable_whatsapp_manual ? 1 : 0) : null,
+        body.sender_name ?? null,
+        body.reply_to_email ?? null,
+        body.consent_copy_text ?? null,
+        body.sandbox_recipient_email || null,
+        businessId
+      )
+    );
+  }
+
+  if (statements.length > 0) {
+    await c.env.DB.batch(statements);
+  }
+
+  return c.json({ success: true });
+});
+
+// Configure reminder rules (enable / disable)
+ownerRouter.put('/reminder-rules', async (c) => {
+  const businessId = c.get('business_id');
+  const body = (await c.req.json().catch(() => ({}))) as any;
+  const rules = Array.isArray(body.rules) ? body.rules : [];
+  const nowIso = new Date().toISOString();
+
+  const statements: D1PreparedStatement[] = [];
+
+  for (const r of rules) {
+    if (r.offset_minutes && r.enabled !== undefined) {
+      statements.push(
+        c.env.DB.prepare(
+          `UPDATE reminder_rules
+           SET enabled = ?, updated_at_utc = ?
+           WHERE business_id = ? AND offset_minutes = ?`
+        ).bind(r.enabled ? 1 : 0, nowIso, businessId, Number(r.offset_minutes))
+      );
+    }
+  }
+
+  if (statements.length > 0) {
+    await c.env.DB.batch(statements);
+  }
+
+  const updatedRules = await c.env.DB.prepare(
+    'SELECT * FROM reminder_rules WHERE business_id = ? ORDER BY offset_minutes DESC'
+  ).bind(businessId).all();
+
+  return c.json({ rules: updatedRules.results || [] });
 });

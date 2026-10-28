@@ -473,3 +473,66 @@ pnpm build
 - Connect D1 notification queues and cron triggers for booking confirmations, reminders (24h/2h), and honest Resend delivery.
 - Build dry-run mode for development and local testing.
 
+---
+
+## 9. Phase 7 Handoff
+
+### What Exists
+1. **Additive Schema & Idempotent Backfill (`migrations/0002_notifications_and_reminders.sql`):**
+   - Added `consent_copy_text` and `sandbox_recipient_email` to `notification_preferences`.
+   - Added `opted_out_at_utc` and `opt_out_reason` to `customers`.
+   - Idempotent backfill script to populate default reminder rules (1440m = 24h, 120m = 2h) and notification preferences for all businesses. Verified idempotent across repeated runs.
+2. **Notification Engine (`src/worker/notifications/`):**
+   - `provider.ts`: Resend REST API client sending `Idempotency-Key` headers (24h retention), transparent dry-run fallback (`simulated`), sandbox mode recipient gating (`skipped_sandbox`), and sanitized error logging (redacts keys and tokens).
+   - `jobCreator.ts`: Generates transactional notice jobs (`booking_confirmed`, `booking_rescheduled`, `booking_cancelled`) and scheduled reminder jobs based on `reminder_rules`. Snapshots `booking_version` and generates unique `idempotency_key`s.
+   - `jobProcessor.ts`: Atomic claim with 5-minute lease expiry, capped exponential backoff ($2^n \times 60$s), max 3 attempts before `permanently_failed`. Evaluates booking version mismatch (transitions stale jobs to `superseded`), customer opt-out status (`skipped_consent`), quiet hours shifts (22:00–08:00 shifted to next morning 08:00, reminders only), and 15-minute lateness threshold (`skipped_late`).
+   - `emailTemplates.ts`: Text/HTML rendering for all notification types with reference code, appointment details, manage URL, and opt-out unsubscribe link.
+3. **Cron & Immediate Hook Wiring:**
+   - `scheduled()` handler in `src/worker/index.ts` processes up to 10 jobs per 5-minute cron invocation.
+   - `dispatchBookingNotificationHook` in `src/worker/notificationsHook.ts` creates jobs post-save and triggers an immediate attempt via `ctx.waitUntil`.
+4. **Owner Management & Public APIs:**
+   - `GET /api/owner/notifications`: List jobs with status filters (`all`, `failed`, `simulated`, `accepted`, `queued`), delivery mode banner (`real`, `sandbox`, `dry_run`).
+   - `POST /api/owner/notifications/:id/retry`: Manual retry for failed jobs going through the claim processor.
+   - `GET /api/owner/notifications/preferences` & `PATCH`: Communication preferences, quiet hours, and consent copy.
+   - `GET /api/owner/reminder-rules` & `PUT`: Rule configurations (24h, 2h toggles).
+   - `POST /api/public/:slug/manage/:token/opt-out`: Customer self-service unsubscribe endpoint.
+5. **Frontend UI Components (`src/web/`):**
+   - `src/web/pages/NotificationsPage.tsx`: Operational notification dashboard with mode banner (`[Real Delivery Mode]`, `[Sandbox Mode]`, or `[Dry-run Mode]`), exact required labels ("Accepted by provider, delivery unconfirmed", "Dry-run (not sent)", "Skipped: <reason>", "Failed: <sanitized reason>"), manual retry, and `wa.me` fallback links.
+   - Notifications Tab in `SettingsPage.tsx` for reminder rules (24h/2h toggles), quiet hours (start/end), consent copy, and sandbox testing.
+   - Per-booking notification history section in `BookingDetailDrawer.tsx`.
+   - Wired `/app/notifications` route in `App.tsx`.
+6. **Automated Verification:**
+   - Full test suite: 15 test files, 89 tests passing cleanly:
+     - `tests/reminders_notifications.test.tsx` (11 tests: backfill idempotency, atomic claim under 3 parallel processors, stuck lease expiry, booking version mismatch, consent & opt-out, quiet hours shift, 15-minute lateness boundary, sandbox gating, dry-run simulation, sanitized provider errors, tenant isolation, dead-button/UI label audit).
+     - Full suite passes across all 15 test files (89/89 tests green).
+   - `pnpm typecheck` (`tsc --noEmit`): 0 errors.
+   - `pnpm build` (`vite build`): Compiles cleanly into `./dist` in 6.78s.
+
+### Exact Commands to Run and Verify
+```bash
+# 1. Run all 89 tests in the test suite
+pnpm test
+
+# 2. Run notifications & reminders test suite specifically
+pnpm test tests/reminders_notifications.test.tsx
+
+# 3. Run TypeScript typecheck
+pnpm typecheck
+
+# 4. Build frontend production assets
+pnpm build
+```
+
+### Known Bugs / Limitations
+- **Resend Webhooks:** Deferred per standing rules. Provider-accepted is marked `accepted`; the UI never sets "delivered" without provider confirmation.
+- **Customer Profiles:** Comprehensive customer profiles and relationship notes will be expanded in Phase 6.
+
+### Key Decisions Made
+- `Idempotency-Key` is passed directly in Resend API headers using structured keys (`<action>_<bookingId>_v<version>`), ensuring external provider deduplication.
+- Quiet hours shift applies strictly to scheduled reminders (shifting overnight intervals to 08:00 next morning); transactional notices (confirmations, reschedules, cancellations) are exempt and send immediately.
+- 15-minute lateness threshold safely cancels stale reminders if cron execution is delayed, avoiding sending past or tardy notifications to clients.
+- Customer self-service opt-out allows instant unsubscription and invalidates pending reminder jobs (`skipped_consent`).
+
+### First Task of Next Phase (Phase 6: Customers Directory & History Timeline)
+- Build customer directory page (`/app/customers`), search, customer detail drawer, appointment history timeline, and private notes.
+

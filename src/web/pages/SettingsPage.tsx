@@ -101,6 +101,14 @@ export const SettingsPage: React.FC = () => {
   const [cancelCutoffHours, setCancelCutoffHours] = useState(2);
   const [cancellationPolicyText, setCancellationPolicyText] = useState('');
 
+  // Tab: Notifications & Reminders
+  const [quietHoursStart, setQuietHoursStart] = useState('22:00');
+  const [quietHoursEnd, setQuietHoursEnd] = useState('08:00');
+  const [reminder24hEnabled, setReminder24hEnabled] = useState(true);
+  const [reminder2hEnabled, setReminder2hEnabled] = useState(true);
+  const [consentCopyText, setConsentCopyText] = useState('I agree to receive booking confirmations and reminder updates via email and messaging.');
+  const [sandboxRecipientEmail, setSandboxRecipientEmail] = useState('');
+
   // Tab 5: Sharing & QR
   const qrCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [qrSvgString, setQrSvgString] = useState<string>('');
@@ -152,6 +160,25 @@ export const SettingsPage: React.FC = () => {
         if (hRes.data) setSchedules(hRes.data.schedules || []);
         if (bRes.data) setBreaks(bRes.data.breaks || []);
         if (holRes.data) setHolidays(holRes.data.holidays || []);
+
+        try {
+          const notifRes = await apiClient.get<any>('/api/owner/notifications/preferences');
+          if (notifRes.data) {
+            const pref = notifRes.data.preferences || {};
+            const qh = notifRes.data.quiet_hours || {};
+            const rules = notifRes.data.reminder_rules || [];
+            if (qh.start) setQuietHoursStart(qh.start);
+            if (qh.end) setQuietHoursEnd(qh.end);
+            if (pref.consent_copy_text) setConsentCopyText(pref.consent_copy_text);
+            if (pref.sandbox_recipient_email) setSandboxRecipientEmail(pref.sandbox_recipient_email);
+            const r24 = rules.find((r: any) => r.offset_minutes === 1440);
+            if (r24) setReminder24hEnabled(r24.enabled === 1);
+            const r2 = rules.find((r: any) => r.offset_minutes === 120);
+            if (r2) setReminder2hEnabled(r2.enabled === 1);
+          }
+        } catch {
+          // Defaults preserved
+        }
       } catch (err) {
         setServerError('Failed to load business settings');
       } finally {
@@ -371,6 +398,37 @@ export const SettingsPage: React.FC = () => {
     }
   };
 
+  const handleSaveNotifications = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSaving(true);
+    setServerError(null);
+    try {
+      await Promise.all([
+        apiClient.patch('/api/owner/notifications/preferences', {
+          quiet_hours_start: quietHoursStart,
+          quiet_hours_end: quietHoursEnd,
+          consent_copy_text: consentCopyText.trim(),
+          sandbox_recipient_email: sandboxRecipientEmail.trim() || null,
+        }),
+        fetch('/api/owner/reminder-rules', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            rules: [
+              { offset_minutes: 1440, enabled: reminder24hEnabled },
+              { offset_minutes: 120, enabled: reminder2hEnabled },
+            ],
+          }),
+        }),
+      ]);
+      showToast('Notification settings and reminder rules saved');
+    } catch {
+      setServerError('Failed to save notification settings');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // --- PUBLISH TOGGLE ---
   const handleTogglePublish = async (nextState: boolean) => {
     setServerError(null);
@@ -485,6 +543,7 @@ export const SettingsPage: React.FC = () => {
           { id: 'services', label: `Services (${services.filter((s) => s.is_active === 1).length})` },
           { id: 'hours', label: 'Hours & Calendar' },
           { id: 'policies', label: 'Policies' },
+          { id: 'notifications', label: 'Notifications & Reminders' },
           { id: 'sharing', label: 'Share & QR Code' },
         ]}
         activeTab={activeTab}
@@ -886,6 +945,109 @@ export const SettingsPage: React.FC = () => {
             <div className="pt-4 flex justify-end">
               <Button type="submit" variant="primary" loading={saving}>
                 Save Policy Settings
+              </Button>
+            </div>
+          </form>
+        </Card>
+      )}
+
+      {/* TAB: NOTIFICATIONS & REMINDERS (E2, E7) */}
+      {activeTab === 'notifications' && (
+        <Card className="p-6 sm:p-8 space-y-6">
+          <div>
+            <h2 className="text-lg font-semibold text-ink">Notifications & Reminders Settings</h2>
+            <p className="text-xs text-ink-muted">
+              Configure automated customer reminders, quiet hours, consent wording, and sandbox testing.
+            </p>
+          </div>
+
+          <form onSubmit={handleSaveNotifications} className="space-y-6">
+            <div className="space-y-3 pb-4 border-b border-border">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink-muted">
+                Scheduled Reminder Rules
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="flex items-center justify-between p-3.5 bg-surface rounded-card border border-border">
+                  <div>
+                    <span className="font-semibold text-xs text-ink block">24 Hours Before</span>
+                    <span className="text-[11px] text-ink-muted">Send automated email reminder 1 day prior</span>
+                  </div>
+                  <Switch
+                    checked={reminder24hEnabled}
+                    onChange={(checked) => setReminder24hEnabled(checked)}
+                  />
+                </div>
+
+                <div className="flex items-center justify-between p-3.5 bg-surface rounded-card border border-border">
+                  <div>
+                    <span className="font-semibold text-xs text-ink block">2 Hours Before</span>
+                    <span className="text-[11px] text-ink-muted">Send urgent email reminder 2 hours prior</span>
+                  </div>
+                  <Switch
+                    checked={reminder2hEnabled}
+                    onChange={(checked) => setReminder2hEnabled(checked)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-3 pb-4 border-b border-border">
+              <div>
+                <h3 className="text-xs font-bold uppercase tracking-wider text-ink-muted">
+                  Quiet Hours Protection
+                </h3>
+                <p className="text-xs text-ink-muted mt-0.5">
+                  Reminders falling in quiet hours are automatically shifted to the next morning (08:00).
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <TextField
+                  label="Quiet Hours Start"
+                  type="time"
+                  value={quietHoursStart}
+                  onChange={(e) => setQuietHoursStart(e.target.value)}
+                  hint="Beginning of quiet night interval (default 22:00)"
+                />
+                <TextField
+                  label="Quiet Hours End"
+                  type="time"
+                  value={quietHoursEnd}
+                  onChange={(e) => setQuietHoursEnd(e.target.value)}
+                  hint="End of quiet night interval (default 08:00)"
+                />
+              </div>
+            </div>
+
+            <div className="space-y-3 pb-4 border-b border-border">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink-muted">
+                Customer Consent Disclosure
+              </h3>
+              <TextArea
+                label="Public Consent Copy Wording"
+                value={consentCopyText}
+                onChange={(e) => setConsentCopyText(e.target.value)}
+                hint="Displayed alongside reminder checkboxes during online booking"
+                rows={2}
+              />
+            </div>
+
+            <div className="space-y-3 pb-2">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-ink-muted">
+                Developer Sandbox Testing
+              </h3>
+              <TextField
+                label="Sandbox Allowed Recipient Email (Optional)"
+                placeholder="e.g. owner@example.com"
+                value={sandboxRecipientEmail}
+                onChange={(e) => setSandboxRecipientEmail(e.target.value)}
+                hint="When set, emails will ONLY be delivered to this address; all other recipients will be skipped in sandbox mode."
+              />
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <Button type="submit" variant="primary" loading={saving}>
+                Save Notification Settings
               </Button>
             </div>
           </form>

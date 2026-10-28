@@ -75,6 +75,7 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
 }) => {
   const [booking, setBooking] = useState<BookingDetails | null>(null);
   const [events, setEvents] = useState<BookingEvent[]>([]);
+  const [notifications, setNotifications] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isTransitioning, setIsTransitioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -89,13 +90,21 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
     setIsLoading(true);
     setError(null);
     try {
-      const res = await fetch(`/api/owner/bookings/${bookingId}`);
+      const [res, notifRes] = await Promise.all([
+        fetch(`/api/owner/bookings/${bookingId}`),
+        fetch(`/api/owner/notifications?booking_id=${bookingId}`),
+      ]);
       if (!res.ok) {
         throw new Error('Could not find booking record.');
       }
       const data = (await res.json()) as any;
       setBooking(data.booking);
       setEvents(data.events || []);
+
+      if (notifRes.ok) {
+        const notifData = (await notifRes.json()) as any;
+        setNotifications(notifData.jobs || []);
+      }
     } catch (err: any) {
       setError(err.message || 'Failed to load booking');
     } finally {
@@ -409,6 +418,57 @@ export const BookingDetailDrawer: React.FC<BookingDetailDrawerProps> = ({
                         </p>
                       </div>
                     ))
+                  )}
+                </div>
+              </div>
+
+              {/* Notification History Timeline (E8) */}
+              <div className="space-y-2 pt-2 border-t border-border">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-ink-muted uppercase tracking-wider">
+                    Notification History
+                  </span>
+                  <span className="text-[10px] text-ink-muted font-mono">{notifications.length} notices</span>
+                </div>
+                <div className="space-y-2">
+                  {notifications.length === 0 ? (
+                    <p className="text-xs text-ink-muted">No notifications scheduled or dispatched.</p>
+                  ) : (
+                    notifications.map((n) => {
+                      let label = n.status;
+                      let badgeColor = 'bg-surface text-ink-muted border-border';
+                      if (n.status === 'accepted') {
+                        label = 'Accepted by provider, delivery unconfirmed';
+                        badgeColor = 'bg-accent-tint text-accent border-accent/30';
+                      } else if (n.status === 'simulated') {
+                        label = 'Dry-run (not sent)';
+                        badgeColor = 'bg-surface text-ink-muted border-border';
+                      } else if (n.status.startsWith('skipped_')) {
+                        const reason = n.status === 'skipped_late' ? 'Late (>15 min)' : n.status === 'skipped_consent' ? 'Opted out' : 'Restricted';
+                        label = `Skipped: ${reason}`;
+                        badgeColor = 'bg-warning-tint text-warning border-warning/30';
+                      } else if (n.status === 'failed' || n.status === 'permanently_failed') {
+                        label = `Failed: ${n.last_error_category || 'Delivery error'}`;
+                        badgeColor = 'bg-danger-tint text-danger border-danger/30';
+                      }
+
+                      return (
+                        <div key={n.id} className="text-xs bg-surface p-2.5 rounded border border-border space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold capitalize text-ink">
+                              {n.template_key.replace(/_/g, ' ')}
+                            </span>
+                            <span className={`text-[10px] font-semibold px-2 py-0.5 rounded border ${badgeColor}`}>
+                              {label}
+                            </span>
+                          </div>
+                          <div className="text-[10px] text-ink-muted flex items-center justify-between">
+                            <span>Due: {new Date(n.due_at_utc).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</span>
+                            {n.provider_message_id && <span>Msg: {n.provider_message_id}</span>}
+                          </div>
+                        </div>
+                      );
+                    })
                   )}
                 </div>
               </div>

@@ -7,6 +7,7 @@ import { ERROR_CODES, ApiErrorResponse } from '../shared/errorCodes';
 import { authRouter } from './routes/auth';
 import { ownerRouter } from './routes/owner';
 import { publicRouter } from './routes/public';
+import { processNotificationQueue } from './notifications/jobProcessor';
 
 const app = new Hono<{ Bindings: AppBindings; Variables: AuthContext }>();
 
@@ -107,6 +108,13 @@ export default {
    */
   async scheduled(event: ScheduledEvent, env: AppBindings, ctx: ExecutionContext): Promise<void> {
     console.log(`[Cron Trigger] Executing at ${new Date(event.scheduledTime).toISOString()}`);
-    // Phase 7 reminder claim and dispatch logic will be wired here
+    try {
+      const stats = await processNotificationQueue(env, 10);
+      console.log(
+        `[Cron Trigger Complete] Processed: ${stats.processed}, Accepted: ${stats.accepted}, Simulated: ${stats.simulated}, Skipped: ${stats.skipped}, Failed: ${stats.failed}`
+      );
+    } catch (err: any) {
+      console.error('[Cron Trigger Processing Error]:', err?.message || err);
+    }
   },
 };

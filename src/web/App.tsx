@@ -12,6 +12,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { TodayPage } from './pages/TodayPage';
 import { CalendarDayPage } from './pages/CalendarDayPage';
 import { BookingsListPage } from './pages/BookingsListPage';
+import { NotificationsPage } from './pages/NotificationsPage';
 import { PublicBookingPage } from './pages/PublicBookingPage';
 import { PublicManagePage } from './pages/PublicManagePage';
 import { EmptyState } from './components/ui/Feedback';
@@ -74,6 +75,8 @@ const RouterContent: React.FC = () => {
       pageContent = <CalendarDayPage />;
     } else if (currentPath === '/app/bookings') {
       pageContent = <BookingsListPage />;
+    } else if (currentPath === '/app/notifications') {
+      pageContent = <NotificationsPage />;
     } else if (currentPath === '/app/settings') {
       pageContent = <SettingsPage />;
     } else {

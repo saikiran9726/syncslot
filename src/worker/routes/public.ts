@@ -836,3 +836,56 @@ publicRouter.post('/:slug/manage/:token/reschedule', async (c) => {
     },
   });
 });
+
+
+// Customer Opt-out / Unsubscribe from reminders via token or reference
+publicRouter.post('/:slug/manage/:token/opt-out', async (c) => {
+  const slug = (c.req.param('slug') || '').toLowerCase().trim();
+  const token = c.req.param('token') || '';
+
+  c.header('Cache-Control', 'no-store');
+  c.header('Referrer-Policy', 'no-referrer');
+
+  const ip = getClientIp(c);
+  const salt = c.env.RATE_LIMIT_SALT || 'salt';
+  const rateCheck = await checkCustomRateLimit(c.env.DB, `optout:${ip}`, 30, 60, salt);
+  if (!rateCheck.allowed) {
+    return c.json<ApiErrorResponse>({ error: { code: ERROR_CODES.RATE_LIMITED, message: 'Too many requests' } }, 429);
+  }
+
+  const tokenHash = await sha256Hex(token);
+  const booking = await c.env.DB.prepare(
+    `SELECT b.id, b.customer_id, b.business_id
+     FROM bookings b
+     JOIN businesses biz ON b.business_id = biz.id
+     WHERE (b.manage_token_hash = ? OR b.reference = ?) AND biz.slug = ?
+     LIMIT 1`
+  )
+    .bind(tokenHash, token, slug)
+    .first<{ id: string; customer_id: string; business_id: string }>();
+
+  if (!booking) {
+    return c.json<ApiErrorResponse>(
+      { error: { code: ERROR_CODES.NOT_FOUND, message: 'Booking not found or link has expired' } },
+      404
+    );
+  }
+
+  const nowIso = new Date().toISOString();
+
+  // 1. Mark customer as opted out
+  await c.env.DB.prepare(
+    `UPDATE customers
+     SET opted_out_at_utc = ?, consent_email_reminders = 0, updated_at_utc = ?
+     WHERE id = ?`
+  ).bind(nowIso, nowIso, booking.customer_id).run();
+
+  // 2. Invalidate pending reminder jobs for this customer
+  await c.env.DB.prepare(
+    `UPDATE notification_jobs
+     SET status = 'skipped_consent', updated_at_utc = ?
+     WHERE customer_id = ? AND template_key LIKE 'reminder_%' AND status IN ('queued', 'retry_scheduled')`
+  ).bind(nowIso, booking.customer_id).run();
+
+  return c.json({ success: true, opted_out: true, message: 'You have been unsubscribed from appointment reminders.' });
+});
