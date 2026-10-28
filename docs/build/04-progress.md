@@ -42,13 +42,13 @@
 - [x] **A6:** Hours, breaks, holidays, blocked periods (Phase 3)
 - [x] **A7:** Timezone, booking and cancellation policies (Phase 3)
 - [x] **A8:** Public booking URL and QR generator (Phase 3)
-- [ ] **B1:** Mobile public booking page (4 steps at 375px) (Phase 4)
-- [ ] **B2:** Live slot availability engine (Phase 4)
-- [ ] **B3:** Contact form, note, Zod validation (Phase 4)
-- [ ] **B4:** Instant confirmation default flow (Phase 4)
-- [ ] **B5:** Reference code and confirmation only after DB save (Phase 4)
-- [ ] **B6:** Customer reschedule/cancel with secure token (Phase 4)
-- [ ] **B8:** Simultaneous booking safety (`slot_cells` unique key) (Phase 4)
+- [x] **B1:** Mobile public booking page (4 steps at 375px) (Phase 4)
+- [x] **B2:** Live slot availability engine (Phase 4)
+- [x] **B3:** Contact form, note, Zod validation (Phase 4)
+- [x] **B4:** Instant confirmation default flow (Phase 4)
+- [x] **B5:** Reference code and confirmation only after DB save (Phase 4)
+- [x] **B6:** Customer reschedule/cancel with secure token (Phase 4)
+- [x] **B8:** Simultaneous booking safety (`slot_cells` unique key) (Phase 4)
 - [ ] **C1:** Day/week/agenda views and filters (Phase 5)
 - [ ] **C2:** Quick Add with booking source labels (Phase 5)
 - [ ] **C3:** Overlap prevention in owner Quick Add (Phase 5)
@@ -78,8 +78,8 @@
 - [x] **A2:** Industry presets (Salon, Clinic, Tutor) (Phase 3)
 - [x] **A3a:** Accessibility information on public profile (Phase 3)
 - [x] **A5:** Staff / resource selector & eligibility (Phase 3)
-- [ ] **B4 (Mode):** Owner approval mode toggle & pending flow (Phase 4)
-- [ ] **B7:** Alternative slots UI on 409 conflict (Phase 4)
+- [x] **B4 (Mode):** Owner approval mode toggle & pending flow (Phase 4)
+- [x] **B7:** Alternative slots UI on 409 conflict (Phase 4)
 - [ ] **C4:** Needs Attention operational panel (Phase 5)
 - [ ] **C6:** Tenant-scoped CSV booking export (Phase 8)
 - [ ] **D5:** Duplicate customer detection and controlled merge (Phase 6)
@@ -107,7 +107,7 @@
 | **Phase 1** | Architecture & Data Foundation (Vite + Worker + D1 + Vitest) | **COMPLETED** |
 | **Phase 2** | Design System & UI Primitive Foundation | **COMPLETED** |
 | **Phase 3** | Authentication & Business Setup | **COMPLETED** |
-| **Phase 4** | Customer Booking Engine & Concurrency Safety | *Queued* |
+| **Phase 4** | Customer Booking Engine & Concurrency Safety | **COMPLETED** |
 | **Phase 5** | Owner Command Center & Booking Operations | *Queued* |
 | **Phase 6** | Customer Directory, Profile & Chronological Timeline | *Queued* |
 | **Phase 7** | Reminders, Notification Worker & Safe Fallback | *Queued* |
@@ -300,8 +300,97 @@ pnpm build
 - Publish Gate strictly prevents publishing businesses without at least 1 service and 1 open working hours interval.
 
 ### First Task of Next Phase (Phase 4)
-- Build Phase 4 (Customer Booking Engine & Concurrency Safety):
-  - Live availability engine (`GET /api/public/availability`): calculates available slots for a given date, service, duration, and buffer against working hours, breaks, holidays, and existing reservations.
-  - Public booking wizard (4 steps at 375px: Service $\rightarrow$ Slot $\rightarrow$ Contact Intake Form $\rightarrow$ Confirmation Screen).
-  - Atomic double-booking prevention: batch insertion into `bookings` and `slot_cells(resource_id, cell_start_utc)` with UNIQUE constraint collision handling (returns 409 conflict and alternative slots UI).
-  - Customer self-service reschedule and cancellation flow with secure manage token (`/manage/:token`).
+- Completed in Phase 4.
+
+---
+
+## 7. Phase 4 Handoff
+
+### What Exists
+1. **Deterministic Availability Engine (`src/shared/availability.ts`):**
+   - Pure, deterministic slot calculation on 15-minute intervals.
+   - Respects: business timezone, working hours, breaks, holidays, blocked periods, duration + buffer, minimum notice, maximum horizon, and existing reserved slot cells.
+   - Converts local times to UTC instants taking DST into account (`localToUtc` and `utcToLocal`, tested on Europe/London clock transitions).
+   - Local timezone formatting (`getTimezoneLabel`) returning e.g. `"India Standard Time, GMT+5:30"`.
+   - Nearest alternative slots generator (`findAlternativeSlots`) for 409 collision recovery.
+
+2. **Phone Normalization Module (`src/shared/phone.ts`):**
+   - Powered by `libphonenumber-js/min`.
+   - Normalizes any input phone (including Indian 10-digit trunk, +91 with spaces, 0-prefixed, 91-prefixed, dashed, bracketed) to strict E.164 (`+919876543210`) and national display format (`98765 43210`).
+   - All 12 boundary phone cases tested and verified in `tests/phone.test.ts`.
+
+3. **Atomic Slot Cells Reservation & Concurrency Safety (`src/worker/routes/public.ts`, `src/shared/slotCells.ts`):**
+   - Atomic reservation via D1 `batch()` transactional semantics across `bookings`, `slot_cells(resource_id, cell_start_utc)`, and `booking_events`.
+   - Strict `UNIQUE(resource_id, cell_start_utc)` constraint prevents any two customers from claiming overlapping intervals.
+   - Concurrency collision handling: When a race occurs, exactly 1 succeeds (201) and runner-ups receive 409 `slot_taken` along with 3 nearest alternative slots.
+   - Verified by `tests/concurrency_20.test.ts` firing 20 simultaneous HTTP POST requests via `Promise.all` against the real Worker + local D1 runtime: exactly 1 succeeded and 19 received 409 `slot_taken`.
+
+4. **Public REST Endpoints:**
+   - `GET /api/public/business/:slug` & `GET /api/public/:slug`: Public business profile and active services (404 if unpublished).
+   - `GET /api/public/:slug/availability`: Query live available slots with min notice, buffer, and slot cell collision checks.
+   - `POST /api/public/:slug/bookings`: Atomic booking creation with Crockford base32 reference code (`SS-XXXXXXXX`), SHA-256 hashed 32-byte manage token, client price-tamper immunity (uses DB canonical price), phone normalization, marketing source attribution, and rate limiting (10 req/10 min).
+   - `GET /api/public/:slug/manage/:token`: Self-service booking details with `can_cancel` and `can_reschedule` flags based on `cancel_cutoff_hours`.
+   - `POST /api/public/:slug/manage/:token/cancel`: Self-service cancellation within policy window, deleting `slot_cells` and appending audit event.
+   - `POST /api/public/:slug/manage/:token/reschedule`: Self-service reschedule within policy window, moving `slot_cells` atomically and incrementing version.
+
+5. **Customer Booking & Management Frontend (`src/web/`):**
+   - `/b/:slug`: 4-step mobile-first wizard (375px responsive):
+     - Step 1: Service selection cards with duration and price in INR (₹).
+     - Step 2: 14-day horizontal date strip + grouped time slots (Morning / Afternoon / Evening) with timezone label.
+     - Step 3: Contact intake form with +91 phone normalization preview, optional email, notes, policy summary, and reminder consent.
+     - Step 4: Confirmation screen with human reference code, `.ics` download button, and self-service management link.
+     - Conflict recovery sheet: On 409 `slot_taken`, offers 1-click alternative slots.
+   - `/b/:slug/manage/:token`: Self-service management screen for viewing status, downloading `.ics`, rescheduling, or cancelling within cutoff.
+
+6. **RFC 5545 Calendar Invite Generator (`src/shared/ics.ts`):**
+   - Generates `.ics` calendar invite with strict CRLF (`\r\n`), UTC `DTSTART`/`DTEND`, stable UID `${reference}@slotsync.dev`, and client-side download utility.
+
+7. **Automated Verification:**
+   - 13 test files, 70 passing automated tests in Vitest:
+     - `tests/availability.test.ts` (8 tests)
+     - `tests/booking_api.test.ts` (8 tests)
+     - `tests/concurrency_20.test.ts` (1 test: 20-way parallel race condition test)
+     - `tests/phone.test.ts` (12 tests)
+     - `tests/auth_api.test.ts` (5 tests)
+     - `tests/tenant_isolation.test.ts` (2 tests)
+     - `tests/business_config.test.ts` (3 tests)
+     - `tests/qr_code.test.ts` (2 tests)
+     - `tests/wizard_ui.test.tsx` (2 tests)
+     - `tests/schema_and_constraints.test.ts` (7 tests)
+     - `tests/concurrency_slot_cells.test.ts` (1 test)
+     - `tests/auth_crypto.test.ts` (8 tests)
+     - `tests/components.test.tsx` (11 tests)
+   - `pnpm typecheck` (`tsc --noEmit`): 0 errors.
+   - `pnpm build` (`vite build`): Compiles cleanly into `./dist` in 7.08s.
+
+### Exact Commands to Run and Verify
+```bash
+# 1. Run all 70 tests in the test suite
+pnpm test
+
+# 2. Run the 20-way concurrency race-condition test specifically
+pnpm test tests/concurrency_20.test.ts
+
+# 3. Run TypeScript typecheck
+pnpm typecheck
+
+# 4. Build frontend production assets
+pnpm build
+```
+
+### Known Bugs / Limitations
+- **Alternatives Horizon:** Conflict alternatives search is limited to the same day or immediate next available slots (per cut line specification).
+- **Approval Mode:** Automatic instant booking is the primary active path; approval mode sets initial status to `'pending'` awaiting owner approval in Phase 5.
+
+### Key Decisions Made
+- `slot_cells` table reserves 15-minute discrete intervals including service duration + buffer; the buffer is occupied to prevent overlap, but excluded from visible customer appointment end time.
+- Manage tokens are 32-byte cryptographic random tokens stored as SHA-256 hashes in `bookings.manage_token_hash`. Plain tokens are only returned once upon booking creation.
+- Concurrency safety uses D1 atomic batch with `UNIQUE(resource_id, cell_start_utc)` constraint, guaranteeing race-proof reservations even under high parallel load.
+
+### First Task of Next Phase (Phase 5)
+- Build Phase 5 (Owner Command Center & Booking Operations):
+  - Dashboard Today panel: running schedule, next upcoming appointment, quick stats (confirmed, pending, today's revenue in ₹).
+  - Calendar views: Agenda view, Day view, and Week view with date picker and status filtering.
+  - Owner Quick Add modal with overlap prevention (`slot_cells` transaction) and booking source selection (phone, walk-in, etc.).
+  - Booking detail drawer with manual status transitions (Confirm, Complete, Cancel, No-Show) and operational audit timeline.
+

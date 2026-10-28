@@ -9,7 +9,7 @@ export interface RateLimitResult {
   retryAfterSeconds?: number;
 }
 
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
+const LOGIN_WINDOW_MS = 15 * 60 * 1000; // 15 minutes
 const MAX_LOGIN_ATTEMPTS = 5;
 
 export async function checkLoginRateLimit(
@@ -17,11 +17,28 @@ export async function checkLoginRateLimit(
   identifier: string,
   salt: string
 ): Promise<RateLimitResult> {
+  return checkCustomRateLimit(
+    db,
+    `login:${identifier.toLowerCase().trim()}`,
+    MAX_LOGIN_ATTEMPTS,
+    LOGIN_WINDOW_MS / 1000,
+    salt
+  );
+}
+
+export async function checkCustomRateLimit(
+  db: D1Database,
+  key: string,
+  maxAttempts: number,
+  windowSeconds: number,
+  salt: string
+): Promise<RateLimitResult> {
   const now = Date.now();
-  const windowStartMs = Math.floor(now / WINDOW_MS) * WINDOW_MS;
+  const windowMs = windowSeconds * 1000;
+  const windowStartMs = Math.floor(now / windowMs) * windowMs;
   const windowStartUtc = new Date(windowStartMs).toISOString();
 
-  const bucketHash = await computeBucketHash(`login:${identifier.toLowerCase().trim()}`, salt);
+  const bucketHash = await computeBucketHash(key, salt);
 
   const existing = await db
     .prepare('SELECT count FROM rate_limits WHERE bucket_hash = ? AND window_start_utc = ?')
@@ -30,8 +47,8 @@ export async function checkLoginRateLimit(
 
   const currentCount = existing?.count ?? 0;
 
-  if (currentCount >= MAX_LOGIN_ATTEMPTS) {
-    const retryAfter = Math.ceil((windowStartMs + WINDOW_MS - now) / 1000);
+  if (currentCount >= maxAttempts) {
+    const retryAfter = Math.ceil((windowStartMs + windowMs - now) / 1000);
     return {
       allowed: false,
       remaining: 0,
@@ -51,6 +68,6 @@ export async function checkLoginRateLimit(
 
   return {
     allowed: true,
-    remaining: MAX_LOGIN_ATTEMPTS - (currentCount + 1),
+    remaining: maxAttempts - (currentCount + 1),
   };
 }

@@ -10,6 +10,7 @@ import { LoginPage } from './pages/LoginPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PublicBookingPage } from './pages/PublicBookingPage';
+import { PublicManagePage } from './pages/PublicManagePage';
 import { EmptyState } from './components/ui/Feedback';
 
 const RouterContent: React.FC = () => {
@@ -39,6 +40,13 @@ const RouterContent: React.FC = () => {
 
   if (currentPath === '/onboarding') {
     return <OnboardingPage />;
+  }
+
+  // Public Manage Route: /b/:slug/manage/:token
+  const manageMatch = currentPath.match(/^\/b\/([a-z0-9-]+)\/manage\/([A-Za-z0-9_-]+)/);
+  if (manageMatch) {
+    const [, slug, token] = manageMatch;
+    return <PublicManagePage slug={slug} token={token} />;
   }
 
   // Public Booking Route: /b/:slug

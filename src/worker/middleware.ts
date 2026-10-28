@@ -174,7 +174,23 @@ export async function handleIdempotency(c: Context<{ Bindings: AppBindings; Vari
     return next();
   }
 
-  const businessId = c.get('business_id') || 'public';
+  let businessId = c.get('business_id');
+  if (!businessId) {
+    const match = c.req.path.match(/\/api\/public\/([^/]+)/);
+    if (match) {
+      const slug = match[1].toLowerCase().trim();
+      const row = await c.env.DB.prepare('SELECT id FROM businesses WHERE slug = ?').bind(slug).first<{ id: string }>();
+      if (row) {
+        businessId = row.id;
+      }
+    }
+  }
+
+  if (!businessId) {
+    await next();
+    return;
+  }
+
   const route = c.req.path;
   const rawBody = await c.req.raw.clone().text();
   const requestHash = await sha256Hex(rawBody);

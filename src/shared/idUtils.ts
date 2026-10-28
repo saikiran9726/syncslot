@@ -21,6 +21,9 @@ export function generateReferenceCode(): string {
   return `SS-${code}`;
 }
 
+export const generateHumanReference = generateReferenceCode;
+
+
 /**
  * Generates a 32-byte secure random token encoded as base64url.
  * Used for customer self-service manage links and session tokens.

@@ -96,6 +96,8 @@ app.all('*', async (c) => {
   );
 });
 
+export { app };
+
 export default {
   fetch: app.fetch,
 
