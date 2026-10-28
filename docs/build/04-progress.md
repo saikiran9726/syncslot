@@ -681,4 +681,66 @@ pnpm build
 ### First Task of Next Phase (Phase 10: Production Deployment & Smoke Testing)
 - Execute production Cloudflare Worker deployment, migrate remote D1 database, configure Cloudflare environment secrets (`SESSION_SECRET`, `TOKEN_SECRET`, `RATE_LIMIT_SALT`, `RESEND_API_KEY`), and perform end-to-end smoke verification on live custom domain.
 
+---
+
+## 10. Phase 10 Handoff
+
+### What Exists
+1. **Production Deployment Readiness & Local Emulation (`docs/phase10-report.md`):**
+   - Verified that `DEPLOY_AUTHORIZED = NO`, `RUN_PRODUCTION_MIGRATIONS_AUTHORIZED = NO`, `OVERWRITE_EXISTING_DEPLOYMENT_AUTHORIZED = NO`, `REAL_EMAIL_MODE_AUTHORIZED = NO`.
+   - Simulated all live production checks locally using `@cloudflare/vitest-pool-workers` and Miniflare with production-like bindings.
+2. **Comprehensive Live Verification Suite (`tests/phase10_live_verification.test.ts`):**
+   - 14 live checks covering:
+     - Health endpoint (`GET /api/health` -> HTTP 200, status `ok`).
+     - SPA frontend root and deep links (`GET /`, `GET /b/:slug`, `GET /app/today` -> HTTP 200 with HTML shell).
+     - Unknown API 404 (`GET /api/unknown-xyz` -> HTTP 404 with JSON error code).
+     - Strict Phase 9 security headers (`Content-Security-Policy`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`).
+     - Labeled owner signup and authentication (`POST /api/auth/register` -> HTTP 201, sets HttpOnly `slotsync_session` cookie).
+     - Service creation & publishing gate (`POST /api/owner/services` -> HTTP 201, `PATCH /api/owner/business` -> HTTP 200).
+     - Public availability engine (`GET /api/public/:slug/availability` -> HTTP 200 with discrete slots).
+     - Public booking creation (`POST /api/public/:slug/bookings` -> HTTP 201 with `SS-XXXXXXXX` reference and HMAC manage token).
+     - Atomic concurrency collision defense (`POST /api/public/:slug/bookings` for same slot -> HTTP 409 `slot_taken` with alternatives).
+     - Manage token link and cancellation (`GET /api/public/:slug/manage/:token` -> HTTP 200, `POST /.../cancel` -> HTTP 200 with `Cache-Control: no-store` and `Pragma: no-cache`).
+     - Owner dashboard Today and Bookings view (`GET /api/owner/dashboard/today` -> HTTP 200, `GET /api/owner/bookings` -> HTTP 200).
+     - Notification queue timeline with honest delivery mode (`GET /api/owner/notifications` -> HTTP 200, `delivery_mode: "dry_run"`, jobs show `simulated`).
+     - Cloudflare Cron Trigger background run (`worker.scheduled(...)` -> processes queue without unhandled errors).
+3. **Automated Verification:**
+   - Full test suite: 18 test files, 116 tests passing cleanly:
+     - `tests/phase10_live_verification.test.ts` (7 tests: health, root, deep links, unknown 404, security headers, end-to-end lifecycle, cron execution).
+     - Full suite passes across all 18 test files (116/116 tests green).
+   - `pnpm typecheck` (`tsc --noEmit`): 0 errors.
+   - `pnpm build` (`vite build`): Compiles cleanly into `./dist` in 3.89s.
+   - `wrangler whoami`: Zero tokens printed.
+   - Local D1 database state: all 25 tables present and synchronized.
+4. **Production Runbook & Rollback Guide:**
+   - Documented step-by-step manual execution instructions for `wrangler login`, `wrangler d1 create`, `wrangler d1 migrations apply --remote`, `wrangler secret put`, `pnpm build`, and `wrangler deploy`.
+   - Documented rollback procedures (`wrangler rollback`, `wrangler d1 time-travel restore`, and cron disable).
+
+### Exact Commands to Run and Verify
+```bash
+# 1. Run all 116 tests across 18 test suites
+pnpm test
+
+# 2. Run Phase 10 verification test suite specifically
+npx vitest run tests/phase10_live_verification.test.ts
+
+# 3. Run TypeScript typecheck
+pnpm typecheck
+
+# 4. Build frontend production assets
+pnpm build
+```
+
+### Known Bugs / Limitations
+- Remote deployment was not executed because `DEPLOY_AUTHORIZED = NO`.
+- Remote cron trigger execution on Cloudflare edge marked `NOT VERIFIED REMOTELY`.
+
+### Key Decisions Made
+- Because `DEPLOY_AUTHORIZED = NO` and `RUN_PRODUCTION_MIGRATIONS_AUTHORIZED = NO`, zero remote Cloudflare resources or production data were created or altered. All verification checks were performed locally using Miniflare Cloudflare Workers test pool with production bindings.
+- Secrets (`RATE_LIMIT_SALT`, `SESSION_SECRET`, `TOKEN_SECRET`) are documented by name only, with exact `wrangler secret put` commands provided for the operator.
+
+### First Task of Next Phase (Phase 11: Final Polish & Production Launch Handoff)
+- Review system documentation, prepare final user guide, and verify production launch checklist.
+
+
 
