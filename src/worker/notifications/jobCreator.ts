@@ -16,7 +16,7 @@ export async function createNotificationJobsForEvent(
     .prepare(
       `SELECT b.id, b.business_id, b.customer_id, b.start_at_utc, b.status, b.version,
               b.consent_email_reminders,
-              c.email AS customer_email, c.opted_out_at_utc
+              c.email AS customer_email, c.opted_out_at_utc, c.pending_deletion
        FROM bookings b
        JOIN customers c ON b.customer_id = c.id
        WHERE b.id = ?`
@@ -32,6 +32,7 @@ export async function createNotificationJobsForEvent(
       consent_email_reminders: number;
       customer_email: string | null;
       opted_out_at_utc: string | null;
+      pending_deletion: number;
     }>();
 
   if (!booking || !booking.customer_email) {
@@ -42,7 +43,7 @@ export async function createNotificationJobsForEvent(
   const statements: D1PreparedStatement[] = [];
 
   const hasConsent =
-    booking.consent_email_reminders === 1 && !booking.opted_out_at_utc;
+    booking.consent_email_reminders === 1 && !booking.opted_out_at_utc && booking.pending_deletion !== 1;
 
   // --- EVENT: BOOKING CANCELLED ---
   if (eventType === 'BOOKING_CANCELLED') {

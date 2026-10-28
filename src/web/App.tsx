@@ -12,6 +12,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { TodayPage } from './pages/TodayPage';
 import { CalendarDayPage } from './pages/CalendarDayPage';
 import { BookingsListPage } from './pages/BookingsListPage';
+import { CustomersPage } from './pages/CustomersPage';
 import { NotificationsPage } from './pages/NotificationsPage';
 import { PublicBookingPage } from './pages/PublicBookingPage';
 import { PublicManagePage } from './pages/PublicManagePage';
@@ -75,6 +76,8 @@ const RouterContent: React.FC = () => {
       pageContent = <CalendarDayPage />;
     } else if (currentPath === '/app/bookings') {
       pageContent = <BookingsListPage />;
+    } else if (currentPath === '/app/customers') {
+      pageContent = <CustomersPage />;
     } else if (currentPath === '/app/notifications') {
       pageContent = <NotificationsPage />;
     } else if (currentPath === '/app/settings') {

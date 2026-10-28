@@ -147,7 +147,7 @@ export async function processNotificationQueue(
       `SELECT b.id AS booking_id, b.status AS booking_status, b.version AS booking_version,
               b.start_at_utc, b.reference, b.price_minor, b.currency, b.cancelled_reason,
               c.id AS customer_id, c.name AS customer_name, c.email AS customer_email,
-              c.opted_out_at_utc, c.consent_email_reminders,
+              c.opted_out_at_utc, c.consent_email_reminders, c.pending_deletion,
               biz.name AS business_name, biz.slug AS business_slug, biz.timezone AS business_timezone,
               biz.quiet_hours_start, biz.quiet_hours_end,
               np.sandbox_recipient_email
@@ -172,6 +172,7 @@ export async function processNotificationQueue(
         customer_email: string | null;
         opted_out_at_utc: string | null;
         consent_email_reminders: number;
+        pending_deletion: number;
         business_name: string;
         business_slug: string;
         business_timezone: string;
@@ -211,7 +212,7 @@ export async function processNotificationQueue(
 
     // 6. Eligibility Check: Customer Consent & Opt-Out (Reminders only)
     if (isReminder) {
-      if (details.consent_email_reminders === 0 || details.opted_out_at_utc !== null) {
+      if (details.consent_email_reminders === 0 || details.opted_out_at_utc !== null || details.pending_deletion === 1) {
         await env.DB.prepare(
           `UPDATE notification_jobs SET status = 'skipped_consent', updated_at_utc = ? WHERE id = ?`
         ).bind(nowIso, job.id).run();

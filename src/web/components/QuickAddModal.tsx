@@ -17,6 +17,11 @@ export interface QuickAddModalProps {
   initialDate?: string;
   initialTime?: string;
   businessTimezone?: string;
+  initialCustomerId?: string;
+  initialCustomerName?: string;
+  initialCustomerPhone?: string;
+  initialCustomerEmail?: string;
+  initialServiceId?: string;
 }
 
 interface ServiceOption {
@@ -34,14 +39,20 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   initialDate,
   initialTime = '10:00',
   businessTimezone = 'Asia/Kolkata',
+  initialCustomerId,
+  initialCustomerName = '',
+  initialCustomerPhone = '',
+  initialCustomerEmail = '',
+  initialServiceId = '',
 }) => {
   const todayStr = new Date().toISOString().slice(0, 10);
   const [date, setDate] = useState(initialDate || todayStr);
   const [time, setTime] = useState(initialTime);
-  const [serviceId, setServiceId] = useState('');
-  const [customerName, setCustomerName] = useState('');
-  const [customerPhone, setCustomerPhone] = useState('');
-  const [customerEmail, setCustomerEmail] = useState('');
+  const [customerId, setCustomerId] = useState(initialCustomerId || '');
+  const [serviceId, setServiceId] = useState(initialServiceId || '');
+  const [customerName, setCustomerName] = useState(initialCustomerName || '');
+  const [customerPhone, setCustomerPhone] = useState(initialCustomerPhone || '');
+  const [customerEmail, setCustomerEmail] = useState(initialCustomerEmail || '');
   const [source, setSource] = useState<BookingSource>('phone');
   const [notes, setNotes] = useState('');
 
@@ -50,11 +61,16 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Sync initial date if changed
+  // Sync initial props if changed
   useEffect(() => {
     if (initialDate) setDate(initialDate);
     if (initialTime) setTime(initialTime);
-  }, [initialDate, initialTime]);
+    if (initialCustomerId !== undefined) setCustomerId(initialCustomerId || '');
+    if (initialCustomerName !== undefined) setCustomerName(initialCustomerName || '');
+    if (initialCustomerPhone !== undefined) setCustomerPhone(initialCustomerPhone || '');
+    if (initialCustomerEmail !== undefined) setCustomerEmail(initialCustomerEmail || '');
+    if (initialServiceId !== undefined) setServiceId(initialServiceId || '');
+  }, [initialDate, initialTime, initialCustomerId, initialCustomerName, initialCustomerPhone, initialCustomerEmail, initialServiceId]);
 
   // Fetch active services on modal open
   useEffect(() => {
@@ -118,6 +134,7 @@ export const QuickAddModal: React.FC<QuickAddModalProps> = ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          customer_id: customerId || undefined,
           service_id: serviceId,
           start_at_utc: startAtUtc,
           customer_name: customerName.trim(),

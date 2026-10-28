@@ -174,6 +174,14 @@ export const MergeCustomerSchema = z.object({
 
 export type MergeCustomerInput = z.infer<typeof MergeCustomerSchema>;
 
+export const UpdateCustomerSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(100).optional(),
+  email: z.string().trim().email('Invalid email').optional().or(z.literal('')),
+  pending_deletion: z.boolean().optional(),
+});
+
+export type UpdateCustomerInput = z.infer<typeof UpdateCustomerSchema>;
+
 // --- REVIEW SCHEMAS ---
 
 export const CreateReviewSchema = z.object({

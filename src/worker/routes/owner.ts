@@ -14,6 +14,9 @@ import {
   CreateBlockedPeriodSchema,
   OwnerCreateBookingSchema,
   StatusTransitionSchema,
+  CreateCustomerNoteSchema,
+  MergeCustomerSchema,
+  UpdateCustomerSchema,
 } from '../../shared/schemas';
 import { generateUUID, generateReferenceCode, generateSecretToken, sha256Hex } from '../../shared/idUtils';
 import { recordAuditLog } from '../audit';
@@ -1042,15 +1045,58 @@ ownerRouter.post('/bookings', async (c) => {
   const requiredCells = computeSlotCells(start_at_utc, bufferEndAtUtc);
 
   // 6. Customer lookup or creation
-  let finalCustomerId = customer_id || generateUUID();
+  let finalCustomerId = customer_id;
   let possibleMatch = 0;
   const nowIso = new Date().toISOString();
 
-  const existingCustomer = await c.env.DB.prepare(
-    'SELECT id, name, email FROM customers WHERE business_id = ? AND normalized_phone = ?'
-  )
-    .bind(businessId, phoneNormalized.e164)
-    .first<{ id: string; name: string; email: string | null }>();
+  let existingCustomer: { id: string; name: string; email: string | null; pending_deletion?: number } | null = null;
+
+  if (finalCustomerId) {
+    existingCustomer = await c.env.DB.prepare(
+      'SELECT id, name, email, pending_deletion FROM customers WHERE id = ? AND business_id = ?'
+    )
+      .bind(finalCustomerId, businessId)
+      .first<{ id: string; name: string; email: string | null; pending_deletion: number }>();
+
+    // Check alias if not found directly
+    if (!existingCustomer) {
+      const alias = await c.env.DB.prepare(
+        'SELECT new_customer_id FROM customer_aliases WHERE old_customer_id = ? AND business_id = ?'
+      )
+        .bind(finalCustomerId, businessId)
+        .first<{ new_customer_id: string }>();
+
+      if (alias) {
+        finalCustomerId = alias.new_customer_id;
+        existingCustomer = await c.env.DB.prepare(
+          'SELECT id, name, email, pending_deletion FROM customers WHERE id = ? AND business_id = ?'
+        )
+          .bind(finalCustomerId, businessId)
+          .first<{ id: string; name: string; email: string | null; pending_deletion: number }>();
+      }
+    }
+  }
+
+  if (!existingCustomer) {
+    existingCustomer = await c.env.DB.prepare(
+      'SELECT id, name, email, pending_deletion FROM customers WHERE business_id = ? AND normalized_phone = ?'
+    )
+      .bind(businessId, phoneNormalized.e164)
+      .first<{ id: string; name: string; email: string | null; pending_deletion: number }>();
+  }
+
+  // Pending deletion check
+  if (existingCustomer && existingCustomer.pending_deletion === 1) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.VALIDATION_FAILED,
+          message: 'Cannot create appointments for a customer marked for deletion',
+        },
+      },
+      422
+    );
+  }
 
   const statements: D1PreparedStatement[] = [];
 
@@ -1066,6 +1112,7 @@ ownerRouter.post('/bookings', async (c) => {
       );
     }
   } else {
+    finalCustomerId = generateUUID();
     statements.push(
       c.env.DB.prepare(
         `INSERT INTO customers (
@@ -1172,6 +1219,7 @@ ownerRouter.post('/bookings', async (c) => {
   const created = await c.env.DB.prepare(
     `SELECT b.id, b.reference, b.start_at_utc, b.end_at_utc, b.business_timezone,
             b.source, b.status, b.price_minor, b.currency, b.version, b.notes,
+            b.possible_match,
             c.id AS customer_id, c.name AS customer_name, c.display_phone AS customer_phone,
             s.id AS service_id, s.name AS service_name, s.duration_minutes
      FROM bookings b
@@ -1568,4 +1616,478 @@ ownerRouter.put('/reminder-rules', async (c) => {
   ).bind(businessId).all();
 
   return c.json({ rules: updatedRules.results || [] });
+});
+
+// ==========================================
+// 8. CUSTOMER DIRECTORY & PROFILES (D1 - D6)
+// ==========================================
+
+// GET /api/owner/customers - Directory list with search, pagination, and visit stats
+ownerRouter.get('/customers', async (c) => {
+  const businessId = c.get('business_id');
+  const q = c.req.query('q')?.trim();
+  const limit = Math.min(Number(c.req.query('limit')) || 50, 100);
+  const offset = Number(c.req.query('offset')) || 0;
+  const pendingDelParam = c.req.query('pending_deletion');
+
+  let whereSql = 'c.business_id = ?';
+  const whereParams: any[] = [businessId];
+
+  if (pendingDelParam !== undefined && pendingDelParam !== '') {
+    whereSql += ' AND c.pending_deletion = ?';
+    whereParams.push(pendingDelParam === '1' || pendingDelParam === 'true' ? 1 : 0);
+  }
+
+  if (q) {
+    const wildcard = `%${q}%`;
+    const phoneNorm = normalizePhone(q);
+    if (phoneNorm.valid) {
+      whereSql += ' AND (c.name LIKE ? OR c.display_phone LIKE ? OR c.normalized_phone = ? OR c.normalized_phone LIKE ? OR c.email LIKE ?)';
+      whereParams.push(wildcard, wildcard, phoneNorm.e164, wildcard, wildcard);
+    } else {
+      whereSql += ' AND (c.name LIKE ? OR c.display_phone LIKE ? OR c.normalized_phone LIKE ? OR c.email LIKE ?)';
+      whereParams.push(wildcard, wildcard, wildcard, wildcard);
+    }
+  }
+
+  // Count total matching
+  const countRes = await c.env.DB.prepare(
+    `SELECT COUNT(DISTINCT c.id) AS total
+     FROM customers c
+     WHERE ${whereSql}`
+  ).bind(...whereParams).first<{ total: number }>();
+
+  const total = countRes?.total ?? 0;
+
+  // Fetch paginated customers with aggregated visit metrics
+  const listSql = `
+    SELECT 
+      c.id, c.business_id, c.name, c.display_phone, c.normalized_phone, c.email,
+      c.pending_deletion, c.pending_deletion_at_utc,
+      c.opted_out_at_utc, c.created_at_utc,
+      COUNT(DISTINCT CASE WHEN b.status != 'cancelled' THEN b.id END) AS total_visits,
+      MAX(CASE WHEN b.status != 'cancelled' THEN b.start_at_utc END) AS last_visit_at_utc,
+      SUM(CASE WHEN b.status = 'completed' THEN b.price_minor ELSE 0 END) AS total_spend_minor
+    FROM customers c
+    LEFT JOIN bookings b ON c.id = b.customer_id AND b.business_id = c.business_id
+    WHERE ${whereSql}
+    GROUP BY c.id
+    ORDER BY c.created_at_utc DESC
+    LIMIT ? OFFSET ?
+  `;
+
+  const listParams = [...whereParams, limit, offset];
+  const listRes = await c.env.DB.prepare(listSql).bind(...listParams).all();
+
+  return c.json({
+    customers: listRes.results || [],
+    total,
+    limit,
+    offset,
+  });
+});
+
+// POST /api/owner/customers/merge - Controlled duplicate merge (Owner only, D5)
+ownerRouter.post('/customers/merge', requireOwnerRole, async (c) => {
+  const businessId = c.get('business_id');
+  const userId = c.get('user_id');
+
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = MergeCustomerSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.VALIDATION_FAILED,
+          message: 'Invalid merge request parameters',
+          fields: Object.fromEntries(parsed.error.issues.map((i) => [i.path.join('.'), i.message])),
+        },
+      },
+      422
+    );
+  }
+
+  const { old_customer_id, new_customer_id } = parsed.data;
+
+  if (old_customer_id === new_customer_id) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.VALIDATION_FAILED,
+          message: 'Cannot merge a customer into themselves',
+        },
+      },
+      422
+    );
+  }
+
+  // Verify both exist in tenant
+  const [oldCust, newCust] = await Promise.all([
+    c.env.DB.prepare('SELECT id, name FROM customers WHERE id = ? AND business_id = ?').bind(old_customer_id, businessId).first<{ id: string; name: string }>(),
+    c.env.DB.prepare('SELECT id, name FROM customers WHERE id = ? AND business_id = ?').bind(new_customer_id, businessId).first<{ id: string; name: string }>(),
+  ]);
+
+  if (!oldCust || !newCust) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.NOT_FOUND,
+          message: 'One or both customers could not be found in this business',
+        },
+      },
+      404
+    );
+  }
+
+  const nowIso = new Date().toISOString();
+
+  // Perform atomic merge:
+  // 1. Reassign bookings to new customer
+  // 2. Reassign notes to new customer
+  // 3. Insert into customer_aliases
+  // 4. Delete old customer
+  await c.env.DB.batch([
+    c.env.DB.prepare(
+      'UPDATE bookings SET customer_id = ?, updated_at_utc = ? WHERE customer_id = ? AND business_id = ?'
+    ).bind(new_customer_id, nowIso, old_customer_id, businessId),
+    c.env.DB.prepare(
+      'UPDATE customer_notes SET customer_id = ? WHERE customer_id = ? AND business_id = ?'
+    ).bind(new_customer_id, old_customer_id, businessId),
+    c.env.DB.prepare(
+      'INSERT OR REPLACE INTO customer_aliases (old_customer_id, new_customer_id, business_id, merged_at_utc) VALUES (?, ?, ?, ?)'
+    ).bind(old_customer_id, new_customer_id, businessId, nowIso),
+    c.env.DB.prepare(
+      'DELETE FROM customers WHERE id = ? AND business_id = ?'
+    ).bind(old_customer_id, businessId),
+  ]);
+
+  // Log audit event (no PII in payload)
+  await recordAuditLog(c.env.DB, {
+    business_id: businessId,
+    actor_user_id: userId,
+    action: 'CUSTOMER_MERGED',
+    target_type: 'customer',
+    target_id: new_customer_id,
+    payload_json: JSON.stringify({ old_customer_id, new_customer_id }),
+  });
+
+  return c.json({
+    success: true,
+    old_customer_id,
+    new_customer_id,
+    merged_at_utc: nowIso,
+  });
+});
+
+// GET /api/owner/customers/:id - Customer profile, timeline, and notes (D2, D6)
+ownerRouter.get('/customers/:id', async (c) => {
+  const businessId = c.get('business_id');
+  const role = c.get('role');
+  let customerId = c.req.param('id');
+
+  let customer = await c.env.DB.prepare(
+    `SELECT id, business_id, name, display_phone, normalized_phone, email,
+            consent_email_reminders, consent_whatsapp_reminders, consent_at_utc,
+            opted_out_at_utc, opt_out_reason, pending_deletion, pending_deletion_at_utc,
+            created_at_utc, updated_at_utc
+     FROM customers
+     WHERE id = ? AND business_id = ?`
+  ).bind(customerId, businessId).first<any>();
+
+  let isMergedAlias = false;
+
+  // Check alias if not found
+  if (!customer) {
+    const alias = await c.env.DB.prepare(
+      'SELECT new_customer_id FROM customer_aliases WHERE old_customer_id = ? AND business_id = ?'
+    ).bind(customerId, businessId).first<{ new_customer_id: string }>();
+
+    if (alias) {
+      isMergedAlias = true;
+      customerId = alias.new_customer_id;
+      customer = await c.env.DB.prepare(
+        `SELECT id, business_id, name, display_phone, normalized_phone, email,
+                consent_email_reminders, consent_whatsapp_reminders, consent_at_utc,
+                opted_out_at_utc, opt_out_reason, pending_deletion, pending_deletion_at_utc,
+                created_at_utc, updated_at_utc
+         FROM customers
+         WHERE id = ? AND business_id = ?`
+      ).bind(customerId, businessId).first<any>();
+    }
+  }
+
+  if (!customer) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.NOT_FOUND,
+          message: 'Customer not found',
+        },
+      },
+      404
+    );
+  }
+
+  // Summary metrics
+  const summaryRes = await c.env.DB.prepare(
+    `SELECT 
+       COUNT(id) AS total_bookings,
+       COUNT(CASE WHEN status = 'completed' THEN 1 END) AS completed_bookings,
+       COUNT(CASE WHEN status = 'cancelled' THEN 1 END) AS cancelled_bookings,
+       COUNT(CASE WHEN status = 'no_show' THEN 1 END) AS no_show_bookings,
+       COUNT(CASE WHEN status = 'confirmed' THEN 1 END) AS confirmed_bookings,
+       SUM(CASE WHEN status = 'completed' THEN price_minor ELSE 0 END) AS total_spend_minor,
+       MAX(CASE WHEN status IN ('completed', 'confirmed') THEN start_at_utc END) AS last_visit_at_utc
+     FROM bookings
+     WHERE customer_id = ? AND business_id = ?`
+  ).bind(customerId, businessId).first<any>();
+
+  // Next upcoming booking
+  const nowIso = new Date().toISOString();
+  const nextBooking = await c.env.DB.prepare(
+    `SELECT b.id, b.reference, b.start_at_utc, b.end_at_utc, b.status, s.name AS service_name
+     FROM bookings b
+     JOIN services s ON b.service_id = s.id
+     WHERE b.customer_id = ? AND b.business_id = ? AND b.status IN ('confirmed', 'pending') AND b.start_at_utc >= ?
+     ORDER BY b.start_at_utc ASC
+     LIMIT 1`
+  ).bind(customerId, businessId, nowIso).first<any>();
+
+  // Full booking history
+  const bookingsRes = await c.env.DB.prepare(
+    `SELECT b.id, b.reference, b.start_at_utc, b.end_at_utc, b.business_timezone,
+            b.source, b.status, b.price_minor, b.currency, b.notes, b.possible_match,
+            b.cancelled_reason, b.created_at_utc,
+            s.id AS service_id, s.name AS service_name, s.duration_minutes
+     FROM bookings b
+     JOIN services s ON b.service_id = s.id
+     WHERE b.customer_id = ? AND b.business_id = ?
+     ORDER BY b.start_at_utc DESC`
+  ).bind(customerId, businessId).all<any>();
+
+  // Customer notes: filter is_private if user is staff (not owner)
+  let notesSql = `
+    SELECT cn.id, cn.note_text, cn.is_private, cn.created_at_utc,
+           COALESCE(u.email, 'Staff') AS author_name,
+           COALESCE(m.role, 'staff') AS author_role
+    FROM customer_notes cn
+    LEFT JOIN users u ON cn.author_user_id = u.id
+    LEFT JOIN memberships m ON m.user_id = u.id AND m.business_id = cn.business_id
+    WHERE cn.customer_id = ? AND cn.business_id = ?
+  `;
+  const notesParams: any[] = [customerId, businessId];
+
+  if (role !== 'owner') {
+    notesSql += ' AND cn.is_private = 0';
+  }
+
+  notesSql += ' ORDER BY cn.created_at_utc DESC';
+  const notesRes = await c.env.DB.prepare(notesSql).bind(...notesParams).all();
+
+  return c.json({
+    customer: {
+      ...customer,
+      is_merged_alias: isMergedAlias,
+    },
+    summary: {
+      total_bookings: summaryRes?.total_bookings ?? 0,
+      completed_bookings: summaryRes?.completed_bookings ?? 0,
+      cancelled_bookings: summaryRes?.cancelled_bookings ?? 0,
+      no_show_bookings: summaryRes?.no_show_bookings ?? 0,
+      confirmed_bookings: summaryRes?.confirmed_bookings ?? 0,
+      total_spend_minor: summaryRes?.total_spend_minor ?? 0,
+      last_visit_at_utc: summaryRes?.last_visit_at_utc ?? null,
+      next_booking: nextBooking ?? null,
+    },
+    bookings: bookingsRes.results || [],
+    notes: notesRes.results || [],
+  });
+});
+
+// POST /api/owner/customers/:id/notes - Add relationship note (D2, D6, D7)
+ownerRouter.post('/customers/:id/notes', async (c) => {
+  const businessId = c.get('business_id');
+  const userId = c.get('user_id');
+  const customerId = c.req.param('id');
+
+  // Verify customer exists
+  const customer = await c.env.DB.prepare(
+    'SELECT id FROM customers WHERE id = ? AND business_id = ?'
+  ).bind(customerId, businessId).first();
+
+  if (!customer) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.NOT_FOUND,
+          message: 'Customer not found',
+        },
+      },
+      404
+    );
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = CreateCustomerNoteSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.VALIDATION_FAILED,
+          message: 'Invalid note data',
+          fields: Object.fromEntries(parsed.error.issues.map((i) => [i.path.join('.'), i.message])),
+        },
+      },
+      422
+    );
+  }
+
+  const { note_text, is_private } = parsed.data;
+  const noteId = generateUUID();
+  const nowIso = new Date().toISOString();
+
+  await c.env.DB.prepare(
+    `INSERT INTO customer_notes (
+      id, business_id, customer_id, author_user_id, note_text, is_private, created_at_utc
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).bind(
+    noteId,
+    businessId,
+    customerId,
+    userId,
+    note_text,
+    is_private ? 1 : 0,
+    nowIso
+  ).run();
+
+  const author = await c.env.DB.prepare(
+    `SELECT u.email, COALESCE(m.role, 'staff') AS role
+     FROM users u
+     LEFT JOIN memberships m ON m.user_id = u.id AND m.business_id = ?
+     WHERE u.id = ?`
+  ).bind(businessId, userId).first<{ email: string; role: string }>();
+
+  return c.json(
+    {
+      note: {
+        id: noteId,
+        business_id: businessId,
+        customer_id: customerId,
+        note_text,
+        is_private: is_private ? 1 : 0,
+        author_name: author?.email || 'Staff',
+        author_role: author?.role || 'staff',
+        created_at_utc: nowIso,
+      },
+    },
+    201
+  );
+});
+
+// DELETE /api/owner/customers/:id/notes/:noteId - Delete note
+ownerRouter.delete('/customers/:id/notes/:noteId', async (c) => {
+  const businessId = c.get('business_id');
+  const customerId = c.req.param('id');
+  const noteId = c.req.param('noteId');
+
+  const note = await c.env.DB.prepare(
+    'SELECT id FROM customer_notes WHERE id = ? AND customer_id = ? AND business_id = ?'
+  ).bind(noteId, customerId, businessId).first();
+
+  if (!note) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.NOT_FOUND,
+          message: 'Note not found',
+        },
+      },
+      404
+    );
+  }
+
+  await c.env.DB.prepare(
+    'DELETE FROM customer_notes WHERE id = ? AND customer_id = ? AND business_id = ?'
+  ).bind(noteId, customerId, businessId).run();
+
+  return c.json({ success: true });
+});
+
+// PATCH /api/owner/customers/:id - Update customer profile or pending_deletion status (D6)
+ownerRouter.patch('/customers/:id', async (c) => {
+  const businessId = c.get('business_id');
+  const customerId = c.req.param('id');
+
+  const customer = await c.env.DB.prepare(
+    'SELECT id, name, email, pending_deletion FROM customers WHERE id = ? AND business_id = ?'
+  ).bind(customerId, businessId).first<{ id: string; name: string; email: string | null; pending_deletion: number }>();
+
+  if (!customer) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.NOT_FOUND,
+          message: 'Customer not found',
+        },
+      },
+      404
+    );
+  }
+
+  const body = await c.req.json().catch(() => ({}));
+  const parsed = UpdateCustomerSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.VALIDATION_FAILED,
+          message: 'Invalid customer update fields',
+          fields: Object.fromEntries(parsed.error.issues.map((i) => [i.path.join('.'), i.message])),
+        },
+      },
+      422
+    );
+  }
+
+  const { name, email, pending_deletion } = parsed.data;
+  const nowIso = new Date().toISOString();
+
+  let newName = customer.name;
+  if (name !== undefined) newName = name.trim();
+
+  let newEmail = customer.email;
+  if (email !== undefined) newEmail = email ? email.trim() : null;
+
+  let newPendingDel = customer.pending_deletion;
+  let newPendingDelAt: string | null = null;
+
+  if (pending_deletion !== undefined) {
+    newPendingDel = pending_deletion ? 1 : 0;
+    newPendingDelAt = pending_deletion ? nowIso : null;
+  }
+
+  await c.env.DB.prepare(
+    `UPDATE customers
+     SET name = ?,
+         email = ?,
+         pending_deletion = ?,
+         pending_deletion_at_utc = CASE WHEN ? IS NOT NULL THEN ? ELSE pending_deletion_at_utc END,
+         updated_at_utc = ?
+     WHERE id = ? AND business_id = ?`
+  ).bind(
+    newName,
+    newEmail,
+    newPendingDel,
+    pending_deletion !== undefined ? newPendingDelAt : null,
+    newPendingDelAt,
+    nowIso,
+    customerId,
+    businessId
+  ).run();
+
+  const updated = await c.env.DB.prepare(
+    'SELECT * FROM customers WHERE id = ? AND business_id = ?'
+  ).bind(customerId, businessId).first();
+
+  return c.json({ customer: updated });
 });

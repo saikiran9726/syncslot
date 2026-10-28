@@ -536,3 +536,75 @@ pnpm build
 ### First Task of Next Phase (Phase 6: Customers Directory & History Timeline)
 - Build customer directory page (`/app/customers`), search, customer detail drawer, appointment history timeline, and private notes.
 
+---
+
+## 8. Phase 6 Handoff
+
+### What Exists
+1. **Additive Schema & Migration (`migrations/0003_customers_pending_deletion.sql`):**
+   - Added `pending_deletion` (`INTEGER NOT NULL DEFAULT 0 CHECK (pending_deletion IN (0, 1))`) and `pending_deletion_at_utc` (`TEXT`) to `customers` table.
+   - Added index `idx_customers_business_pending` on `(business_id, pending_deletion)`. Applied locally with status ✅.
+2. **Safe Customer Matching & Identity Protection (D3):**
+   - Normalized E.164 phone lookup within the tenant boundary.
+   - When a customer books with an existing phone number and identical name, the customer profile is reused.
+   - When a customer books with an existing phone number but a *differing name* (e.g. family member sharing phone), the system links the booking while strictly *preserving* the original customer record name (never overwrites silently) and sets `bookings.possible_match = 1` for owner awareness.
+   - Alias tombstone lookup: if an old customer was merged, lookups follow the alias to the canonical customer.
+3. **Customer Directory API & Aggregations (D1):**
+   - `GET /api/owner/customers`: Tenant-scoped list supporting live search `q` (name, display phone, normalized phone, or email), `pending_deletion` filter (`all`, `active`, `pending`), and pagination (`limit`, `offset`, `total`).
+   - Computes aggregated visit statistics: `total_visits` (`COUNT` of non-cancelled bookings), `last_visit_at_utc`, and `total_spend_minor` (sum of completed booking prices in paise).
+4. **Customer Profile, Timeline & Role-Based Notes API (D2, D6, D7):**
+   - `GET /api/owner/customers/:id`: Full profile details, booking summary metrics (`total_bookings`, `completed_bookings`, `cancelled_bookings`, `no_show_bookings`, `total_spend_minor`), upcoming next appointment, chronological booking history ordered by `start_at_utc DESC`, and relationship notes.
+   - Role-based privacy enforcement (D6): Owners can view all notes including private ones (`is_private = 1`), while staff users only receive public notes (`is_private = 0`).
+   - `POST /api/owner/customers/:id/notes`: Add relationship note with `is_private` boolean, author tracking, and character limits (min 1, max 1000).
+   - `DELETE /api/owner/customers/:id/notes/:noteId`: Delete customer note.
+   - `PATCH /api/owner/customers/:id`: Update customer details (name, email) and toggle `pending_deletion` status.
+5. **Controlled Duplicate Merge (D5):**
+   - `POST /api/owner/customers/merge`: Owner-only endpoint. Validates that both customers exist in the tenant and are distinct. Atomically reassigns all bookings and notes from source to target customer, writes a tombstone to `customer_aliases`, deletes the duplicate record, and logs an audit entry to `audit_log` without PII.
+   - Looking up the old customer ID automatically resolves to the canonical target customer with an `is_merged_alias: true` badge.
+6. **"Book Again" Quick Rebooking (D4):**
+   - Customer profile drawer features a "Book Again" button next to past services.
+   - Prefills `QuickAddModal` with `customer_id`, `customer_name`, `customer_phone`, `customer_email`, and past `service_id`.
+   - Re-evaluates current slot availability and pricing through the standard atomic booking engine (`slot_cells`).
+   - Blocks booking attempts when the customer is flagged with `pending_deletion = 1` (returns HTTP 422).
+7. **Reminder Notification Exclusion:**
+   - Updated `jobCreator.ts` and `jobProcessor.ts` so that customers flagged `pending_deletion = 1` are excluded from reminder job scheduling and dispatch (marked `skipped_consent`).
+8. **Frontend UI Components (`src/web/`):**
+   - `src/web/pages/CustomersPage.tsx`: Full customer directory table and cards with real-time search, status filter pills (`All`, `Active`, `Pending Deletion`), visit counts, last visit date, pagination, and empty states.
+   - `src/web/components/CustomerProfileDrawer.tsx`: Slide-over drawer with customer header, phone/email, WhatsApp prefilled link (`wa.me`), metrics summary cards, appointment timeline with status badges and "Book Again", relationship notes tab with D7 data minimization guidance ("Operational notes only; do not record sensitive medical or financial information"), and pending deletion toggle.
+   - `src/web/components/MergeCustomerModal.tsx`: Searchable target customer selector with warning guidelines and atomic merge trigger.
+   - Updated `QuickAddModal.tsx` to accept prefilled customer and service props.
+   - Wired `/app/customers` in `App.tsx` and updated `OWNER_NAV_ITEMS`.
+9. **Automated Verification:**
+   - Full test suite: 16 test files, 104 tests passing cleanly:
+     - `tests/customers.test.tsx` (15 tests: directory search, profile timeline, safe returning phone match without name overwrite, book again, duplicate merge, role-based notes privacy, pending deletion reminder exclusion, multi-tenant isolation, component rendering).
+     - Full suite passes across all 16 test files (104/104 tests green).
+   - `pnpm typecheck` (`tsc --noEmit`): 0 errors.
+   - `pnpm build` (`vite build`): Compiles cleanly into `./dist` in 9.55s.
+
+### Exact Commands to Run and Verify
+```bash
+# 1. Run all 104 tests in the test suite
+pnpm test
+
+# 2. Run customer test suite specifically
+npx vitest run tests/customers.test.tsx
+
+# 3. Run TypeScript typecheck
+pnpm typecheck
+
+# 4. Build frontend production assets
+pnpm build
+```
+
+### Known Bugs / Limitations
+- None. All customer flows, validation schemas, and database constraints function with zero errors.
+
+### Key Decisions Made
+- Non-overwriting phone matching: Customer names are never silently overwritten when an existing phone is re-submitted with a different name (e.g., family members sharing phone); instead, `possible_match = 1` is flagged on the booking record.
+- Non-unique index on `(business_id, normalized_phone)` was preserved, enabling multiple records or aliased records without schema violations.
+- Deleting the old record during duplicate merge cleans the active directory while leaving `customer_aliases` intact for historical URL/token redirection.
+- `pending_deletion = 1` immediately disables "Book Again" and skips scheduled reminder notifications.
+
+### First Task of Next Phase (Phase 9: Data Security & Multi-Tenant Deep Audit)
+- Execute deep cross-tenant security audit across all routes, verify retention policies, and validate compliance boundaries.
+

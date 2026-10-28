@@ -122,9 +122,9 @@ describe('Phase 7: Notifications & Reminders Engine (E1-E9)', () => {
 
       // Run 3 parallel processor calls simultaneously
       const results = await Promise.all([
-        processNotificationQueue(env, 10),
-        processNotificationQueue(env, 10),
-        processNotificationQueue(env, 10),
+        processNotificationQueue(env as any, 10),
+        processNotificationQueue(env as any, 10),
+        processNotificationQueue(env as any, 10),
       ]);
 
       const totalSimulated = results.reduce((acc, r) => acc + r.simulated, 0);
@@ -173,7 +173,7 @@ describe('Phase 7: Notifications & Reminders Engine (E1-E9)', () => {
       `).bind(jobId, owner.businessId, bookingId, custId, nowIso, expiredLockIso, `lease_${jobId}`, nowIso, nowIso).run();
 
       // Processor run should reclaim this job!
-      const stats = await processNotificationQueue(env, 10);
+      const stats = await processNotificationQueue(env as any, 10);
       expect(stats.processed).toBeGreaterThanOrEqual(1);
 
       const updated = await env.DB.prepare('SELECT status, attempt_count FROM notification_jobs WHERE id = ?')
@@ -214,7 +214,7 @@ describe('Phase 7: Notifications & Reminders Engine (E1-E9)', () => {
         VALUES (?, ?, ?, 1, ?, 'email', 'reminder_24h', ?, 'queued', ?, ?, ?)
       `).bind(jobId, owner.businessId, bookingId, custId, nowIso, `ver_${jobId}`, nowIso, nowIso).run();
 
-      await processNotificationQueue(env, 10);
+      await processNotificationQueue(env as any, 10);
 
       const job = await env.DB.prepare('SELECT status FROM notification_jobs WHERE id = ?')
         .bind(jobId)
@@ -320,7 +320,7 @@ describe('Phase 7: Notifications & Reminders Engine (E1-E9)', () => {
       `).bind(jobAId, owner.businessId, bookingId, custId, `late_${jobAId}`).run();
 
       const time14m59s = new Date(baseMs + (14 * 60 + 59) * 1000).toISOString();
-      await processNotificationQueue(env, 1, time14m59s);
+      await processNotificationQueue(env as any, 1, time14m59s);
 
       const jobA = await env.DB.prepare('SELECT status FROM notification_jobs WHERE id = ?').bind(jobAId).first<{ status: string }>();
       expect(jobA?.status).toBe('simulated'); // Sent!
@@ -333,7 +333,7 @@ describe('Phase 7: Notifications & Reminders Engine (E1-E9)', () => {
       `).bind(jobBId, owner.businessId, bookingId, custId, `late_${jobBId}`).run();
 
       const time15m01s = new Date(baseMs + (15 * 60 + 1) * 1000).toISOString();
-      await processNotificationQueue(env, 1, time15m01s);
+      await processNotificationQueue(env as any, 1, time15m01s);
 
       const jobB = await env.DB.prepare('SELECT status FROM notification_jobs WHERE id = ?').bind(jobBId).first<{ status: string }>();
       expect(jobB?.status).toBe('skipped_late');
@@ -344,7 +344,7 @@ describe('Phase 7: Notifications & Reminders Engine (E1-E9)', () => {
   describe('7. Sandbox Gating & Sanitized Errors (E9)', () => {
     it('sets skipped_sandbox when recipient email is not allowed in sandbox mode', async () => {
       const res = await dispatchEmail(
-        env,
+        env as any,
         'job-123',
         'idem-key-1',
         { to: 'unauthorized@example.com', subject: 'Test', html: '<p>Hi</p>', text: 'Hi' },
@@ -356,7 +356,7 @@ describe('Phase 7: Notifications & Reminders Engine (E1-E9)', () => {
 
     it('simulates dry-run honestly without claiming delivered when no RESEND_API_KEY', async () => {
       const res = await dispatchEmail(
-        env,
+        env as any,
         'job-456',
         'idem-key-2',
         { to: 'client@example.com', subject: 'Test', html: '<p>Hi</p>', text: 'Hi' }
