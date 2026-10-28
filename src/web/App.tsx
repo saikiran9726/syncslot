@@ -9,6 +9,9 @@ import { RegisterPage } from './pages/RegisterPage';
 import { LoginPage } from './pages/LoginPage';
 import { OnboardingPage } from './pages/OnboardingPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { TodayPage } from './pages/TodayPage';
+import { CalendarDayPage } from './pages/CalendarDayPage';
+import { BookingsListPage } from './pages/BookingsListPage';
 import { PublicBookingPage } from './pages/PublicBookingPage';
 import { PublicManagePage } from './pages/PublicManagePage';
 import { EmptyState } from './components/ui/Feedback';
@@ -24,6 +27,11 @@ const RouterContent: React.FC = () => {
     window.addEventListener('popstate', handlePopState);
     return () => window.removeEventListener('popstate', handlePopState);
   }, []);
+
+  const navigate = (path: string) => {
+    window.history.pushState({}, '', path);
+    setCurrentPath(path);
+  };
 
   // Simple client-side routing
   if (currentPath === '/dev/styleguide') {
@@ -58,39 +66,49 @@ const RouterContent: React.FC = () => {
 
   // Owner App Routes: /app/*
   if (currentPath.startsWith('/app')) {
-    if (currentPath === '/app/settings') {
-      return (
-        <OwnerLayout currentPath={currentPath}>
-          <SettingsPage />
-        </OwnerLayout>
-      );
-    }
+    let pageContent: React.ReactNode;
 
-    // Informative empty state for upcoming phases
-    const tabName = currentPath.replace('/app/', '').replace('/', '');
-    const phaseNames: Record<string, string> = {
-      today: 'Phase 5: Owner Command Center & Today Panel',
-      calendar: 'Phase 5: Visual Schedule & Quick Add Intake',
-      customers: 'Phase 6: Customer Directory & History Timeline',
-      notifications: 'Phase 7: Notification Job Status & Resend Delivery',
-      analytics: 'Phase 8: Verified Analytics & Tenant CSV Export',
-    };
+    if (currentPath === '/app/today') {
+      pageContent = <TodayPage />;
+    } else if (currentPath === '/app/calendar') {
+      pageContent = <CalendarDayPage />;
+    } else if (currentPath === '/app/bookings') {
+      pageContent = <BookingsListPage />;
+    } else if (currentPath === '/app/settings') {
+      pageContent = <SettingsPage />;
+    } else {
+      // Informative empty state for upcoming phases
+      const tabName = currentPath.replace('/app/', '').replace('/', '');
+      const phaseNames: Record<string, string> = {
+        customers: 'Phase 6: Customer Directory & History Timeline',
+        services: 'Phase 2: Service Configuration in Settings',
+        reviews: 'Phase 8: Customer Review Collection & Gate',
+        notifications: 'Phase 7: Notification Job Status & Resend Delivery',
+        analytics: 'Phase 8: Verified Analytics & Tenant CSV Export',
+      };
 
-    const targetPhase = phaseNames[tabName] || 'Subsequent Implementation Phase';
+      const targetPhase = phaseNames[tabName] || 'Subsequent Implementation Phase';
 
-    return (
-      <OwnerLayout currentPath={currentPath}>
+      pageContent = (
         <div className="p-8 max-w-4xl mx-auto">
           <EmptyState
             title={`${tabName.charAt(0).toUpperCase() + tabName.slice(1)} Module`}
-            description={`This dashboard operational surface is scheduled for ${targetPhase}.`}
-            actionLabel="Go to Settings & Configuration"
-            onAction={() => {
-              window.history.pushState({}, '', '/app/settings');
-              setCurrentPath('/app/settings');
-            }}
+            description={`This operational surface is scheduled for ${targetPhase}.`}
+            actionLabel="Go to Today Command Center"
+            onAction={() => navigate('/app/today')}
           />
         </div>
+      );
+    }
+
+    return (
+      <OwnerLayout
+        currentPath={currentPath}
+        onNavigate={navigate}
+        businessName={business?.name}
+        isDemo={Boolean(business?.is_demo)}
+      >
+        {pageContent}
       </OwnerLayout>
     );
   }
@@ -105,7 +123,7 @@ const RouterContent: React.FC = () => {
       );
     }
     if (user) {
-      window.location.href = business && business.onboarding_step < 4 ? '/onboarding' : '/app/settings';
+      window.location.href = business && business.onboarding_step < 4 ? '/onboarding' : '/app/today';
       return null;
     }
     return <LoginPage />;

@@ -394,3 +394,82 @@ pnpm build
   - Owner Quick Add modal with overlap prevention (`slot_cells` transaction) and booking source selection (phone, walk-in, etc.).
   - Booking detail drawer with manual status transitions (Confirm, Complete, Cancel, No-Show) and operational audit timeline.
 
+---
+
+## 8. Phase 5 Handoff
+
+### What Exists
+1. **Owner Today Command Center (`/app/today` - C1 & C4):**
+   - Dynamic today metrics in business timezone: total appointments, confirmed, pending approval (with amber alert triage badge), completed, and today's revenue minor (completed revenue in ₹ and expected total).
+   - "Next Up" appointment card with relative countdown, customer details, and working telephone and WhatsApp contact triggers.
+   - Chronological today schedule timeline with status badges, source attribution, and one-click inspection.
+2. **Owner Calendar Day View (`/app/calendar` - C2):**
+   - Hourly schedule grid (08:00 to 20:00) with visual appointment cards displaying time range, customer name, service name, status, and source.
+   - Full date navigation controls: Previous Day (`<`), Next Day (`>`), "Today" quick button, and native date picker input.
+   - Quick Add integration pre-filling selected date and hour.
+3. **Bookings Directory (`/app/bookings` - C3):**
+   - Full-featured bookings directory with live search `q` (customer name, phone, reference code `SS-XXXXXXXX`).
+   - Status filter pills (`All`, `Confirmed`, `Pending`, `Completed`, `Cancelled`, `No Show`).
+   - Date picker filter with one-click clear button.
+   - Pagination controls (Previous / Next with limit 25 and offset).
+4. **Owner Quick Add Modal (`src/web/components/QuickAddModal.tsx` - C5):**
+   - Intake for walk-in, phone, WhatsApp, and other offline bookings.
+   - Live phone normalization (+91 for 10-digit Indian numbers).
+   - Server-side snapshotting of canonical service price (tamper-proof).
+   - Atomically reserves 15-minute intervals in `slot_cells` inside D1 batch transaction.
+   - Catches 409 `slot_taken` conflicts and displays clear guidance to select an alternate time.
+5. **Booking Detail Drawer & Audit Trail (`src/web/components/BookingDetailDrawer.tsx` - C5):**
+   - Slide-over drawer with customer name, phone, email, service details, price, and schedule.
+   - Contact actions: telephone direct call link and prefilled WhatsApp link (`https://wa.me/<digits>?text=...`) opening in a new tab without false sent claims.
+   - State machine transition buttons: "Approve Appointment" (from pending), "Mark Completed", "Mark No-Show", and "Cancel Appointment" (with reason input).
+   - Frees `slot_cells` on cancellation so freed slots can immediately be booked by other clients.
+   - Prevents illegal transitions (`cancelled` -> `completed` returns 400; `completed` -> `cancelled` returns 400).
+   - Chronological audit event log rendered from `booking_events`.
+6. **Automated Verification:**
+   - Full test suite: 14 test files, 78 tests passing cleanly:
+     - `tests/owner_dashboard.test.tsx` (8 tests: auth protection, tenant isolation, dynamic today calculations, 20-way parallel race condition test, state transitions, slot freeing, dead-button audit).
+     - `tests/concurrency_20.test.ts` (1 test: 20-way parallel race condition test).
+     - `tests/tenant_isolation.test.ts` (2 tests).
+     - `tests/booking_api.test.ts` (8 tests).
+     - `tests/availability.test.ts` (8 tests).
+     - `tests/business_config.test.ts` (3 tests).
+     - `tests/auth_api.test.ts` (7 tests).
+     - `tests/phone.test.ts` (12 tests).
+     - `tests/schema_and_constraints.test.ts` (9 tests).
+     - `tests/auth_crypto.test.ts` (8 tests).
+     - `tests/components.test.tsx` (11 tests).
+     - `tests/qr_code.test.ts` (4 tests).
+     - `tests/wizard_ui.test.tsx` (2 tests).
+     - `tests/concurrency_slot_cells.test.ts` (1 test).
+   - `pnpm typecheck` (`tsc --noEmit`): 0 errors.
+   - `pnpm build` (`vite build`): Compiles cleanly into `./dist` in 13.30s.
+
+### Exact Commands to Run and Verify
+```bash
+# 1. Run all 78 tests in the test suite
+pnpm test
+
+# 2. Run the owner dashboard test suite specifically
+pnpm test tests/owner_dashboard.test.tsx
+
+# 3. Run TypeScript typecheck
+pnpm typecheck
+
+# 4. Build frontend production bundle
+pnpm build
+```
+
+### Known Bugs / Limitations
+- **Customer Directory:** Deep customer relationship profiles and customer note editing are queued for Phase 6.
+- **Resend Email Notification:** Notification dispatch hook operates via non-blocking seam; background email delivery queue is wired in Phase 7.
+
+### Key Decisions Made
+- Timezone boundaries for "Today" are dynamically computed in the business timezone via `localToUtc` and `utcToLocal`, preventing UTC boundary errors for Indian Standard Time (UTC+5:30).
+- Cancelling an appointment deletes associated `slot_cells` rows atomically, instantly reopening that time window for public and owner booking.
+- WhatsApp contact triggers generate honest `wa.me` URLs with encoded contextual greetings; never fakes background delivery.
+- Mobile first: touch controls and buttons are sized at $\ge 44$px for seamless mobile smartphone operation.
+
+### First Task of Next Phase (Phase 7: Notification Engine & Resend Integration)
+- Connect D1 notification queues and cron triggers for booking confirmations, reminders (24h/2h), and honest Resend delivery.
+- Build dry-run mode for development and local testing.
+
