@@ -86,3 +86,14 @@ Every row in `notification_jobs.status` must strictly match one of the following
 * **No Plain IPs or PII in Operational Tables:**
   - `rate_limits` table keys on `HMAC(RATE_LIMIT_SALT, ip)` or `HMAC(RATE_LIMIT_SALT, ip + email)`. Raw IP addresses are discarded immediately after HMAC calculation.
   - `booking_events` payload JSON strictly excludes customer name, phone number, and email. It audits only status transitions, actor types, timestamps, and resource IDs.
+
+
+---
+
+## 5. UI Styling Architecture (Locked for Phase 2)
+
+* **Decision:** **Tailwind CSS with CSS Variable Tokens** (Zero CSS Modules mixing).
+* **Rationale:**
+  1. Defines all design tokens as raw CSS variables under `:root` in `src/web/index.css`.
+  2. Maps these variables directly into `tailwind.config.js` (`colors: { ink: 'var(--color-ink)', surface: 'var(--color-surface)', ... }`).
+  3. Provides utility classes with strict token enforcement, ensuring consistent spacing on the 4px grid, unified typography scales, and seamless dark mode support without custom CSS sprawl.

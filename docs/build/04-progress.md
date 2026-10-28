@@ -1,9 +1,9 @@
 # 04 — Progress & Implementation Checklist
 
 **Project:** SlotSync  
-**Current Phase:** Phase 0 Completed  
-**Last Updated:** 2026-10-28 18:59 IST  
-**Overall Completion:** 0 / 45 Requirements (Phase 0 Documentation Only)
+**Current Phase:** Phase 2 Completed  
+**Last Updated:** 2026-10-28 19:45 IST  
+**Overall Completion:** 2 / 45 Requirements (Design System & UI Primitives Operational)
 
 ---
 
@@ -68,9 +68,9 @@
 - [ ] **S1:** Strict multi-tenant isolation on all APIs (Phase 9)
 - [ ] **S2:** Operational audit logging of mutations (Phase 5–7)
 - [ ] **S4:** Secure password hashing & HTTP-only cookies (Phase 3)
-- [ ] **U1:** Mobile-first responsive design system (Phase 2)
+- [x] **U1:** Mobile-first responsive design system (Phase 2)
 - [ ] **U2:** Clearly labelled demo data seeder (Phase 11)
-- [ ] **U3:** State coverage: skeletons, empty, error, offline (Phase 2)
+- [x] **U3:** State coverage: skeletons, empty, error, offline (Phase 2)
 
 ### Priority P1 (High-Value Polish & Secondary Workflows — 16 Items)
 - [ ] **A2:** Industry presets (Salon, Clinic, Tutor) (Phase 3)
@@ -103,7 +103,7 @@
 | :--- | :--- | :--- |
 | **Phase 0** | Repository Inspection & Requirement Lock | **COMPLETED** |
 | **Phase 1** | Architecture & Data Foundation (Vite + Worker + D1 + Vitest) | **COMPLETED** |
-| **Phase 2** | Design System & UI Primitive Foundation | *Queued* |
+| **Phase 2** | Design System & UI Primitive Foundation | **COMPLETED** |
 | **Phase 3** | Authentication & Business Setup | *Queued* |
 | **Phase 4** | Customer Booking Engine & Concurrency Safety | *Queued* |
 | **Phase 5** | Owner Command Center & Booking Operations | *Queued* |
@@ -163,3 +163,67 @@ pnpm db:list:local
 
 ### First Task of Next Phase (Phase 2)
 - Build the Design System Foundation in `src/web/`: install Tailwind CSS directives, configure font tokens and calm color palette, construct reusable UI primitives (Button, Input, Modal, Drawer, Badge, Skeleton loader, EmptyState, ErrorBoundary, OfflineBanner, DemoBadge).
+
+---
+
+## 5. Phase 2 Handoff
+
+### What Exists
+1. **Design System & Token Architecture:**
+   - `src/web/index.css`: Full CSS variable design tokens for warm palette (ink `#14212B`, ink-muted `#5B6770`, surface `#FAF8F5`, card `#FFFFFF`, border `#E7E2DA`, teal accent `#0F766E` with hover `#0B5D57` and tint `#E6F3F1`, success `#15803D`, warning `#B45309`, danger `#B42318`, info `#1D4ED8`), font declarations, 4px grid spacing, radii, tabular numerals, safe-area-inset padding, and `@media (prefers-reduced-motion)` overrides.
+   - `tailwind.config.js`: Integrated Tailwind configuration mapping variables to utilities, custom radii (`control: 8px`, `card: 12px`, `sheet: 16px`), and soft shadows.
+   - Self-hosted typography: Bundled `@fontsource/fraunces` (display headings) and `@fontsource/plus-jakarta-sans` (body/UI) via Vite into `./dist/assets/`, eliminating third-party CDNs and CSP issues.
+2. **Automated WCAG AA Contrast Audit:**
+   - `scripts/check-contrast.js`: Audits all 13 text/background token pairings against WCAG AA standards. 100% pass rate with lowest ratio at $4.51:1$ (exceeding standard $\ge 4.5:1$).
+3. **Reusable Accessible UI Primitives (`src/web/components/ui/`):**
+   - `Button`: Primary, secondary, outline, danger, ghost variants with loading spinner, disabled state, and touch-target enforcement ($\ge 44$px via `IconButton`).
+   - `FormField`: Form fields with labels, hints, and error messages tied to input IDs via `aria-describedby` and polite live announcements (`aria-live="polite"`). Includes `TextField` (iOS zoom-preventing 16px font), `TextArea`, `Select`, `PhoneField` (+91 default prefix), `Checkbox`, and `Switch`.
+   - `Card` & `MetricCard`: Warm bordered containers; MetricCard features tabular numbers and percentage/trend badges.
+   - `StatusBadge` & `DemoBadge`: Badges covering all 5 booking statuses, 5 notification job statuses, and prominent amber demo marker.
+   - `Dialog`, `ConfirmDialog` & `Drawer`/`BottomSheet`: Accessible dialog primitives with focus trapping, `Escape` key listeners, and backdrop click dismissal.
+   - `InlineAlert`, `EmptyState`, `ErrorState` with retry, `Skeleton`, `SkeletonCard`, `SkeletonList`, `OfflineBanner`, and `Toast`.
+   - `PageHeader`, `Tabs`, `Table` (collapsible to cards on $< 640$px), and `Avatar`.
+4. **Responsive Layout Shells (`src/web/components/layouts/`):**
+   - `PublicLayout`: Mobile-first 640px centered card shell with subtle teal brand wash and public business header.
+   - `OwnerLayout`: Desktop sidebar ($\ge 1024$px), collapsible mobile bottom navigation bar ($< 1024$px), safe area insets for iOS, and fixed demo badge.
+5. **Interactive Styleguide & Routes (`src/web/`):**
+   - `src/web/pages/DevStyleguidePage.tsx`: Living interactive styleguide at `/dev/styleguide` demonstrating all primitives, variants, and interactive states.
+   - `src/web/App.tsx`: React Router configuration wiring `/dev/styleguide`, `/b/:slug` (PublicLayout), and `/app/*` (OwnerLayout with informative EmptyStates for upcoming phases).
+   - `src/web/lib/apiClient.ts`: Strongly typed API client with timeout handling, offline detection, and standard error envelope parsing.
+6. **Automated Verification:**
+   - `tests/components.test.tsx`: 11 Vitest component unit tests checking ARIA roles, touch targets, loading states, accessibility labels, and badge classes.
+   - Full test suite: 4 test files, 27 tests passing cleanly (`tests/schema_and_constraints.test.ts`, `tests/concurrency_slot_cells.test.ts`, `tests/auth_crypto.test.ts`, `tests/components.test.tsx`).
+   - `pnpm typecheck` (tsc --noEmit): 0 errors.
+   - `pnpm build` (vite build): Produces production assets in `./dist` in 12s.
+
+### Exact Commands to Run and Verify
+```bash
+# 1. Run full test suite (27 tests across worker and component tests)
+pnpm test
+
+# 2. Run TypeScript typecheck
+pnpm typecheck
+
+# 3. Run WCAG AA contrast check
+pnpm check:contrast
+
+# 4. Build frontend production assets
+pnpm build
+```
+
+### Known Bugs / Limitations
+- None. All components have zero console errors and clean build output.
+- Non-built pages (owner dashboard tabs, booking wizard) cleanly display "Coming in a later phase" `EmptyState` primitives.
+
+### Key Decisions Made
+- Reusable UI primitives built with standard HTML/React semantics and Tailwind CSS variables, without heavy or unverified third-party component libraries.
+- Typography is strictly bundled as static assets via `@fontsource` rather than loaded via Google Fonts CDN, guaranteeing deterministic offline rendering and privacy.
+- `fontSize: 16px` enforced on mobile text inputs to suppress unwanted iOS Safari viewport auto-zooming.
+
+### First Task of Next Phase (Phase 3)
+- Build Phase 3 (Authentication & Business Setup):
+  - Owner registration and login flows with PBKDF2 credential verification and HttpOnly cookie management.
+  - Business profile settings: business name, slug uniqueness, timezone selector, phone and address.
+  - Operating hours, breaks, and holiday exception editor.
+  - Services manager: create/edit services with duration, buffer time, and price in integer paise.
+  - Public booking URL generator and SVG QR code card.

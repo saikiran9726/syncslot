@@ -1,0 +1,78 @@
+/* SlotSync Global CSS Design Tokens & Base Styles */
+
+@import '@fontsource/fraunces/400.css';
+@import '@fontsource/fraunces/600.css';
+@import '@fontsource/plus-jakarta-sans/400.css';
+@import '@fontsource/plus-jakarta-sans/500.css';
+@import '@fontsource/plus-jakarta-sans/600.css';
+@import '@fontsource/plus-jakarta-sans/700.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  /* Warm off-white surfaces, deep ink text, one teal accent */
+  --color-ink: #14212b;
+  --color-ink-muted: #5b6770;
+  --color-surface: #faf8f5;
+  --color-card: #ffffff;
+  --color-border: #e7e2da;
+
+  /* Accent: Teal */
+  --color-accent: #0f766e;
+  --color-accent-hover: #0b5d57;
+  --color-accent-tint: #e6f3f1;
+
+  /* Semantic Feedback & Badge Tokens */
+  --color-success: #15803d;
+  --color-success-tint: #dcfce7;
+  --color-warning: #b45309;
+  --color-warning-tint: #fef3c7;
+  --color-danger: #b42318;
+  --color-danger-tint: #fee2e2;
+  --color-info: #1d4ed8;
+  --color-info-tint: #dbeafe;
+}
+
+/* Base Body Configuration */
+html {
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  color: var(--color-ink);
+  background-color: var(--color-surface);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+/* Prevent iOS Zoom on Inputs by ensuring >= 16px */
+input, select, textarea {
+  font-size: 16px;
+}
+
+/* Tabular Numbers for Money, Clock Times & Durations */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Focus Ring Standard */
+.focus-ring {
+  @apply focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2;
+}
+
+/* Safe Area Inset Support */
+.safe-bottom {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+/* Reduced Motion Respect */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

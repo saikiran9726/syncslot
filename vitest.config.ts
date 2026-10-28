@@ -7,6 +7,7 @@ export default defineWorkersConfig(async () => {
 
   return {
     test: {
+      include: ['tests/*.test.{ts,tsx}'],
       setupFiles: ['./tests/apply-migrations.ts'],
       poolOptions: {
         workers: {
