@@ -16,7 +16,7 @@
     {
       "binding": "DB",
       "database_name": "syncslot-db",
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "ec2a5fd2-5411-4936-9490-787ef2dfe628",
       "migrations_dir": "./migrations"
     }
   ],
@@ -32,5 +32,29 @@
     "EMAIL_FROM": "SlotSync <appointments@slotsync.dev>",
     "RATE_LIMIT_SALT": "dev_rate_limit_salt_change_in_prod",
     "SESSION_SECRET": "dev_session_secret_change_in_prod"
+  },
+  "env": {
+    "production": {
+      "name": "syncslot",
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "syncslot-db",
+          "database_id": "ec2a5fd2-5411-4936-9490-787ef2dfe628",
+          "migrations_dir": "./migrations"
+        }
+      ],
+      "triggers": {
+        "crons": [
+          "*/5 * * * *"
+        ]
+      },
+      "vars": {
+        "ENVIRONMENT": "production",
+        "APP_BASE_URL": "https://syncslot.saikiranroopreddy.workers.dev",
+        "COOKIE_NAME": "slotsync_session",
+        "EMAIL_FROM": "SlotSync <appointments@slotsync.dev>"
+      }
+    }
   }
 }
