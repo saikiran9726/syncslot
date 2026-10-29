@@ -25,6 +25,7 @@ import {
 interface ManageBookingData {
   id: string;
   reference: string;
+  service_id: string;
   start_at_utc: string;
   end_at_utc: string;
   business_timezone: string;
@@ -150,24 +151,89 @@ export const PublicManagePage: React.FC<{ slug: string; token: string }> = ({ sl
     }
   };
 
+  // Helper to format Date to YYYY-MM-DD in a given timezone
+  const getDateInTimezone = (date: Date, timeZone: string): string => {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(date);
+  };
+
+  const getIsoDateInTimezone = (isoString: string, timeZone: string): string => {
+    return new Intl.DateTimeFormat('en-CA', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date(isoString));
+  };
+
   // Handle Reschedule slot search
-  const loadRescheduleSlots = async (dateStr: string) => {
+  const loadRescheduleSlots = async (dateStr: string, autoFindNext = false) => {
     if (!booking) return;
+
+    const tz = booking.business_timezone || 'Asia/Kolkata';
+    const todayStr = getDateInTimezone(new Date(), tz);
+
+    if (dateStr < todayStr) {
+      setAvailableSlots([]);
+      setRescheduleError('Please select today or a future date. Past dates cannot be booked.');
+      return;
+    }
+
     setSlotsLoading(true);
     setRescheduleError(null);
     try {
       const res = await apiClient.get<{ slots?: AvailableSlot[]; available_slots?: AvailableSlot[] }>(
-        `/api/public/${slug}/availability?date=${dateStr}`
+        `/api/public/${slug}/availability?service_id=${booking.service_id}&date=${dateStr}&exclude_booking_id=${booking.id}&manage_token=${token}`
       );
-      if (res.data) {
-        const slots = res.data.slots || res.data.available_slots || [];
+      const slots = res.data?.slots || res.data?.available_slots || [];
+      if (slots.length > 0) {
         setAvailableSlots(slots);
+      } else if (autoFindNext) {
+        // Look up the next 14 days for the earliest date with available slots
+        const futureLimit = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+        const futureStr = getDateInTimezone(futureLimit, tz);
+
+        const rangeRes = await apiClient.get<{ slots?: AvailableSlot[]; available_slots?: AvailableSlot[] }>(
+          `/api/public/${slug}/availability?service_id=${booking.service_id}&from=${todayStr}&to=${futureStr}&exclude_booking_id=${booking.id}&manage_token=${token}`
+        );
+        const rangeSlots = rangeRes.data?.slots || rangeRes.data?.available_slots || [];
+        if (rangeSlots.length > 0) {
+          const firstDate = rangeSlots[0].local_date;
+          setRescheduleDate(firstDate);
+          setAvailableSlots(rangeSlots.filter((s) => s.local_date === firstDate));
+        } else {
+          setAvailableSlots([]);
+        }
+      } else {
+        setAvailableSlots([]);
       }
-    } catch {
+    } catch (err: any) {
       setAvailableSlots([]);
+      setRescheduleError(
+        err.response?.data?.error?.message || 'Unable to load available slots for this date.'
+      );
     } finally {
       setSlotsLoading(false);
     }
+  };
+
+  // Open Reschedule Modal with default valid date
+  const handleOpenReschedule = () => {
+    if (!booking) return;
+    const tz = booking.business_timezone || 'Asia/Kolkata';
+    const todayStr = getDateInTimezone(new Date(), tz);
+    const bookingDateStr = getIsoDateInTimezone(booking.start_at_utc, tz);
+    const initialDate = bookingDateStr >= todayStr ? bookingDateStr : todayStr;
+
+    setRescheduleDate(initialDate);
+    setSelectedNewSlot(null);
+    setRescheduleError(null);
+    setShowRescheduleDialog(true);
+    loadRescheduleSlots(initialDate, true);
   };
 
   // Handle Reschedule submit
@@ -313,7 +379,7 @@ export const PublicManagePage: React.FC<{ slug: string; token: string }> = ({ sl
                 <Button
                   variant="secondary"
                   disabled={!booking.can_reschedule}
-                  onClick={() => setShowRescheduleDialog(true)}
+                  onClick={handleOpenReschedule}
                   className="w-full justify-center"
                 >
                   <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Reschedule
@@ -404,10 +470,17 @@ export const PublicManagePage: React.FC<{ slug: string; token: string }> = ({ sl
             <label className="block text-xs font-medium text-ink mb-1">Pick Date</label>
             <input
               type="date"
+              min={booking ? getDateInTimezone(new Date(), booking.business_timezone || 'Asia/Kolkata') : undefined}
               value={rescheduleDate}
               onChange={(e) => {
-                setRescheduleDate(e.target.value);
-                loadRescheduleSlots(e.target.value);
+                const val = e.target.value;
+                setRescheduleDate(val);
+                setSelectedNewSlot(null);
+                if (val) {
+                  loadRescheduleSlots(val, false);
+                } else {
+                  setAvailableSlots([]);
+                }
               }}
               className="w-full px-3 py-2 text-sm bg-surface border border-border rounded-card text-ink focus:outline-none focus:ring-1 focus:ring-accent"
             />
@@ -415,10 +488,11 @@ export const PublicManagePage: React.FC<{ slug: string; token: string }> = ({ sl
 
           {slotsLoading && <Skeleton className="h-20 w-full" />}
 
-          {!slotsLoading && rescheduleDate && availableSlots.length === 0 && (
-            <p className="text-xs text-ink-muted text-center py-3 bg-surface rounded border border-border">
-              No available slots on this date.
-            </p>
+          {!slotsLoading && rescheduleDate && availableSlots.length === 0 && !rescheduleError && (
+            <div className="text-xs text-ink-muted text-center py-3 bg-surface rounded border border-border space-y-1">
+              <p className="font-medium text-ink">No available slots on this date.</p>
+              <p className="text-[11px]">The business may be closed, fully booked, or outside notice limits. Please pick another date.</p>
+            </div>
           )}
 
           {!slotsLoading && availableSlots.length > 0 && (

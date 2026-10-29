@@ -227,6 +227,7 @@ describe('Public Booking API End-to-End Slice', () => {
     expect(manageRes.status).toBe(200);
     const manageBody = (await manageRes.json()) as any;
     expect(manageBody.booking.reference).toBe(created.booking.reference);
+    expect(manageBody.booking.service_id).toBe(serviceId);
     expect(manageBody.booking.customer_name).toBe('Priya Patel');
     expect(manageBody.booking.can_cancel).toBe(true);
     expect(manageBody.booking.can_reschedule).toBe(true);
@@ -318,5 +319,184 @@ describe('Public Booking API End-to-End Slice', () => {
       .bind(reschedBody.booking.id)
       .all<any>();
     expect(newCells[0].cell_start_utc).toBe(newStartUtc);
+  });
+
+  it('POST /api/public/:slug/manage/:token/reschedule returns 409 slot_taken when target slot is occupied', async () => {
+    // 1. Create Booking A at 2026-11-02 04:30 UTC
+    const createA = await app.request(
+      `/api/public/${slug}/bookings`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id: serviceId,
+          start_at_utc: '2026-11-02T04:30:00.000Z',
+          customer_name: 'Customer A',
+          customer_phone: '+919111111111',
+        }),
+      },
+      env
+    );
+    expect(createA.status).toBe(201);
+
+    // 2. Create Booking B at 2026-11-02 05:30 UTC
+    const createB = await app.request(
+      `/api/public/${slug}/bookings`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id: serviceId,
+          start_at_utc: '2026-11-02T05:30:00.000Z',
+          customer_name: 'Customer B',
+          customer_phone: '+919222222222',
+        }),
+      },
+      env
+    );
+    expect(createB.status).toBe(201);
+    const bodyB = (await createB.json()) as any;
+    const tokenB = bodyB.booking.manage_token;
+
+    // 3. Attempt to reschedule Booking B into Booking A's slot (2026-11-02 04:30 UTC)
+    const conflictRes = await app.request(
+      `/api/public/${slug}/manage/${tokenB}/reschedule`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_start_at_utc: '2026-11-02T04:30:00.000Z' }),
+      },
+      env
+    );
+
+    expect(conflictRes.status).toBe(409);
+    const errBody = (await conflictRes.json()) as any;
+    expect(errBody.error.code).toBe('slot_taken');
+  });
+
+  it('GET /api/public/:slug/availability supports exclude_booking_id for rescheduling self-exclusion', async () => {
+    // 1. Create Booking at 2026-11-02 06:30 UTC
+    const slotTime = '2026-11-02T06:30:00.000Z';
+    const createRes = await app.request(
+      `/api/public/${slug}/bookings`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id: serviceId,
+          start_at_utc: slotTime,
+          customer_name: 'Self Exclude Tester',
+          customer_phone: '+919333333333',
+        }),
+      },
+      env
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as any;
+    const bookingId = created.booking.id;
+    const manageToken = created.booking.manage_token;
+
+    // 2. Normal availability query without exclude_booking_id: slot 06:30 is NOT available
+    const availWithout = await app.request(
+      `/api/public/${slug}/availability?service_id=${serviceId}&date=2026-11-02`,
+      { method: 'GET' },
+      env
+    );
+    const dataWithout = (await availWithout.json()) as any;
+    const slotTaken = dataWithout.available_slots.find((s: any) => s.start_at_utc === slotTime);
+    expect(slotTaken).toBeUndefined();
+
+    // 3. Unauthenticated attempt passing exclude_booking_id without manage_token: REJECTED (still taken)
+    const availUnauth = await app.request(
+      `/api/public/${slug}/availability?service_id=${serviceId}&date=2026-11-02&exclude_booking_id=${bookingId}`,
+      { method: 'GET' },
+      env
+    );
+    const dataUnauth = (await availUnauth.json()) as any;
+    expect(dataUnauth.available_slots.find((s: any) => s.start_at_utc === slotTime)).toBeUndefined();
+
+    // 4. Forged manage_token attempt: REJECTED (still taken)
+    const availForged = await app.request(
+      `/api/public/${slug}/availability?service_id=${serviceId}&date=2026-11-02&exclude_booking_id=${bookingId}&manage_token=fake_unauthorized_token`,
+      { method: 'GET' },
+      env
+    );
+    const dataForged = (await availForged.json()) as any;
+    expect(dataForged.available_slots.find((s: any) => s.start_at_utc === slotTime)).toBeUndefined();
+
+    // 5. Legitimate rescheduling availability query with matching manage_token: slot 06:30 IS available
+    const availWith = await app.request(
+      `/api/public/${slug}/availability?service_id=${serviceId}&date=2026-11-02&exclude_booking_id=${bookingId}&manage_token=${manageToken}`,
+      { method: 'GET' },
+      env
+    );
+    const dataWith = (await availWith.json()) as any;
+    const slotFree = dataWith.available_slots.find((s: any) => s.start_at_utc === slotTime);
+    expect(slotFree).toBeDefined();
+  });
+
+  it('POST /api/public/:slug/manage/:token/reschedule rejects requests violating minimum notice and preserves original slot cells', async () => {
+    // 1. Create Booking at a valid future date (2026-11-02 07:30 UTC)
+    const originalStart = '2026-11-02T07:30:00.000Z';
+    const createRes = await app.request(
+      `/api/public/${slug}/bookings`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          service_id: serviceId,
+          start_at_utc: originalStart,
+          customer_name: 'Min Notice Tester',
+          customer_phone: '+919444444444',
+        }),
+      },
+      env
+    );
+    expect(createRes.status).toBe(201);
+    const created = (await createRes.json()) as any;
+    const bookingId = created.booking.id;
+    const manageToken = created.booking.manage_token;
+
+    // Verify initial slot_cells for this booking
+    const { results: initialCells } = await env.DB.prepare(
+      'SELECT cell_start_utc FROM slot_cells WHERE booking_id = ? ORDER BY cell_start_utc ASC'
+    )
+      .bind(bookingId)
+      .all<any>();
+    expect(initialCells.length).toBeGreaterThan(0);
+    expect(initialCells[0].cell_start_utc).toBe(originalStart);
+
+    // 2. Attempt to reschedule to a slot violating min_notice_hours (business has min_notice_hours = 2)
+    const violatingStart = new Date(Date.now() + 30 * 60 * 1000).toISOString();
+
+    const rejectRes = await app.request(
+      `/api/public/${slug}/manage/${manageToken}/reschedule`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ new_start_at_utc: violatingStart }),
+      },
+      env
+    );
+
+    expect(rejectRes.status).toBe(422);
+    const errBody = (await rejectRes.json()) as any;
+    expect(errBody.error.code).toBe('policy_violation');
+    expect(errBody.error.message).toContain('at least 2 hours in advance');
+
+    // 3. Confirm original booking record in D1 remains unchanged
+    const bookingInDb = await env.DB.prepare('SELECT start_at_utc, version FROM bookings WHERE id = ?')
+      .bind(bookingId)
+      .first<any>();
+    expect(bookingInDb.start_at_utc).toBe(originalStart);
+    expect(bookingInDb.version).toBe(1);
+
+    // 4. Confirm original slot_cells remain unchanged in D1
+    const { results: cellsAfter } = await env.DB.prepare(
+      'SELECT cell_start_utc FROM slot_cells WHERE booking_id = ? ORDER BY cell_start_utc ASC'
+    )
+      .bind(bookingId)
+      .all<any>();
+    expect(cellsAfter).toEqual(initialCells);
   });
 });

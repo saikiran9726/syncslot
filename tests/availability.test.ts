@@ -212,4 +212,72 @@ describe('Availability Engine (Pure & Deterministic)', () => {
     // Sorts by distance from conflict
     expect(alternatives[0].start_at_utc).not.toBe(conflictSlot);
   });
+
+  it('returns zero slots for past dates (e.g. 2026-10-28 when now is 2026-10-29)', () => {
+    // Current time is 2026-10-29 08:30 IST (03:00 UTC)
+    // Target date is in the past: 2026-10-28
+    const slots = computeAvailableSlots({
+      timezone: 'Asia/Kolkata',
+      startDate: '2026-10-28',
+      endDate: '2026-10-28',
+      serviceDurationMinutes: 30,
+      bufferMinutes: 0,
+      workingHours: defaultWorkingHours,
+      nowIso: '2026-10-29T03:00:00.000Z',
+    });
+
+    expect(slots).toHaveLength(0);
+  });
+
+  it('returns zero slots for closed days (e.g. Sunday when is_closed = 1)', () => {
+    // 2026-11-01 is a Sunday (day_of_week = 0)
+    const slots = computeAvailableSlots({
+      timezone: 'Asia/Kolkata',
+      startDate: '2026-11-01',
+      endDate: '2026-11-01',
+      serviceDurationMinutes: 30,
+      bufferMinutes: 0,
+      workingHours: defaultWorkingHours,
+      nowIso: '2026-10-31T00:00:00.000Z',
+    });
+
+    expect(slots).toHaveLength(0);
+  });
+
+  it('returns zero slots for fully booked dates where every 15-minute slot cell is taken', () => {
+    // Collect all slot cells for Monday 2026-11-02 from 09:00 to 17:00 (except lunch 13:00-14:00)
+    // and populate existingSlotCells with every single one
+    const allCells = new Set<string>();
+    // 09:00 to 17:00 local is 03:30 to 11:30 UTC
+    for (let h = 3; h <= 11; h++) {
+      for (const m of [0, 15, 30, 45]) {
+        const hStr = String(h).padStart(2, '0');
+        const mStr = String(m).padStart(2, '0');
+        allCells.add(`2026-11-02T${hStr}:${mStr}:00.000Z`);
+      }
+    }
+
+    const slots = computeAvailableSlots({
+      timezone: 'Asia/Kolkata',
+      startDate: '2026-11-02',
+      endDate: '2026-11-02',
+      serviceDurationMinutes: 30,
+      bufferMinutes: 0,
+      workingHours: defaultWorkingHours,
+      existingSlotCells: allCells,
+      nowIso: '2026-11-01T00:00:00.000Z',
+    });
+
+    expect(slots).toHaveLength(0);
+  });
+
+  it('correctly maps timezone boundaries across midnight between UTC and local time', () => {
+    // In Asia/Kolkata (UTC+5:30), 01:30 AM on 2026-11-03 is 20:00 UTC on 2026-11-02 (previous calendar date in UTC)
+    const utcString = localToUtc('2026-11-03', '01:30', 'Asia/Kolkata');
+    expect(utcString).toBe('2026-11-02T20:00:00.000Z');
+
+    const localObj = utcToLocal('2026-11-02T20:00:00.000Z', 'Asia/Kolkata');
+    expect(localObj.date).toBe('2026-11-03');
+    expect(localObj.time).toBe('01:30');
+  });
 });

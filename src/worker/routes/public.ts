@@ -93,6 +93,8 @@ publicRouter.get('/:slug/availability', async (c) => {
   const serviceId = c.req.query('serviceId') || c.req.query('service_id');
   const fromQuery = c.req.query('from');
   const toQuery = c.req.query('to');
+  const rawExcludeBookingId = c.req.query('exclude_booking_id') || c.req.query('excludeBookingId') || null;
+  const manageToken = c.req.query('manage_token') || c.req.query('token') || null;
 
   if (!serviceId) {
     return c.json<ApiErrorResponse>(
@@ -124,6 +126,21 @@ publicRouter.get('/:slug/availability', async (c) => {
       { error: { code: ERROR_CODES.NOT_FOUND, message: 'Business not found or unavailable' } },
       404
     );
+  }
+
+  // Validate exclude_booking_id authorization: must be accompanied by legitimate manage_token
+  let excludeBookingId: string | null = null;
+  if (rawExcludeBookingId && manageToken) {
+    const tokenHash = await sha256Hex(manageToken);
+    const legitimateBooking = await c.env.DB.prepare(
+      'SELECT id FROM bookings WHERE id = ? AND manage_token_hash = ? AND business_id = ? LIMIT 1'
+    )
+      .bind(rawExcludeBookingId, tokenHash, business.id)
+      .first<{ id: string }>();
+
+    if (legitimateBooking) {
+      excludeBookingId = legitimateBooking.id;
+    }
   }
 
   // Fetch service (never trust client duration or buffer)
@@ -163,15 +180,21 @@ publicRouter.get('/:slug/availability', async (c) => {
     c.env.DB.prepare('SELECT start_at_utc, end_at_utc FROM blocked_periods WHERE business_id = ?')
       .bind(business.id)
       .all(),
-    // Query reserved slot_cells for this business
-    c.env.DB.prepare(
-      `SELECT sc.cell_start_utc
-       FROM slot_cells sc
-       JOIN bookings b ON sc.booking_id = b.id
-       WHERE b.business_id = ? AND b.status IN ('pending', 'confirmed')`
-    )
-      .bind(business.id)
-      .all(),
+    // Query reserved slot_cells for this business (excluding rescheduled booking if specified)
+    (excludeBookingId
+      ? c.env.DB.prepare(
+          `SELECT sc.cell_start_utc
+           FROM slot_cells sc
+           JOIN bookings b ON sc.booking_id = b.id
+           WHERE b.business_id = ? AND b.status IN ('pending', 'confirmed') AND b.id != ?`
+        ).bind(business.id, excludeBookingId)
+      : c.env.DB.prepare(
+          `SELECT sc.cell_start_utc
+           FROM slot_cells sc
+           JOIN bookings b ON sc.booking_id = b.id
+           WHERE b.business_id = ? AND b.status IN ('pending', 'confirmed')`
+        ).bind(business.id)
+    ).all(),
   ]);
 
   const existingSlotCells = new Set((slotCellsRes.results || []).map((r: any) => r.cell_start_utc));
@@ -560,7 +583,7 @@ publicRouter.get('/:slug/manage/:token', async (c) => {
   const tokenHash = await sha256Hex(token);
 
   const booking = await c.env.DB.prepare(
-    `SELECT b.id, b.reference, b.start_at_utc, b.end_at_utc, b.business_timezone,
+    `SELECT b.id, b.reference, b.service_id, b.start_at_utc, b.end_at_utc, b.business_timezone,
             b.status, b.price_minor, b.currency, b.version, b.notes,
             s.name as service_name, s.duration_minutes, s.buffer_minutes,
             c.name as customer_name, c.display_phone, c.email as customer_email,
@@ -735,7 +758,8 @@ publicRouter.post('/:slug/manage/:token/reschedule', async (c) => {
 
   const booking = await c.env.DB.prepare(
     `SELECT b.id, b.business_id, b.service_id, b.resource_id, b.status, b.start_at_utc,
-            b.version, biz.timezone, biz.cancel_cutoff_hours, s.duration_minutes, s.buffer_minutes
+            b.version, biz.timezone, biz.cancel_cutoff_hours, biz.min_notice_hours,
+            s.duration_minutes, s.buffer_minutes
      FROM bookings b
      JOIN businesses biz ON b.business_id = biz.id
      JOIN services s ON b.service_id = s.id
@@ -753,6 +777,7 @@ publicRouter.post('/:slug/manage/:token/reschedule', async (c) => {
       version: number;
       timezone: string;
       cancel_cutoff_hours: number;
+      min_notice_hours: number;
       duration_minutes: number;
       buffer_minutes: number;
     }>();
@@ -786,8 +811,23 @@ publicRouter.post('/:slug/manage/:token/reschedule', async (c) => {
     );
   }
 
-  // Calculate new end time and slot cells
+  // Enforce minimum notice policy for the requested new appointment time
+  const minNoticeHours = booking.min_notice_hours ?? 2;
   const newStartMs = new Date(new_start_at_utc).getTime();
+  const minNoticeMs = Date.now() + minNoticeHours * 60 * 60 * 1000;
+  if (newStartMs < minNoticeMs) {
+    return c.json<ApiErrorResponse>(
+      {
+        error: {
+          code: ERROR_CODES.POLICY_VIOLATION,
+          message: `Rescheduled appointment must be at least ${minNoticeHours} hours in advance.`,
+        },
+      },
+      422
+    );
+  }
+
+  // Calculate new end time and slot cells
   const newEndMs = newStartMs + booking.duration_minutes * 60 * 1000;
   const newBufEndMs = newEndMs + booking.buffer_minutes * 60 * 1000;
 
